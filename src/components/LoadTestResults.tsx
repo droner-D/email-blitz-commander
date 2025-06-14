@@ -1,10 +1,10 @@
-
 import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
 import { Activity, Clock, CheckCircle, XCircle, Zap, Mail, TrendingUp, AlertTriangle } from "lucide-react";
+import { testStateService } from '@/services/TestStateService';
 
 interface LoadTestResultsProps {
   currentTest: any;
@@ -30,7 +30,55 @@ const LoadTestResults = ({ currentTest, testStatus }: LoadTestResultsProps) => {
 
   const [chartData, setChartData] = useState<Array<{ time: string; sent: number; errors: number; responseTime: number }>>([]);
 
-  // Simulate real-time data updates
+  // Subscribe to global test state
+  useEffect(() => {
+    const unsubscribe = testStateService.subscribe((state) => {
+      const testData = state.currentTest || state.lastCompletedTest;
+      if (testData) {
+        updateResultsFromTestData(testData);
+      }
+    });
+
+    return unsubscribe;
+  }, []);
+
+  const updateResultsFromTestData = (testData: any) => {
+    const runtime = testData.endTime 
+      ? (new Date(testData.endTime).getTime() - new Date(testData.startTime).getTime()) / 1000
+      : (Date.now() - new Date(testData.startTime).getTime()) / 1000;
+
+    setResults({
+      totalEmails: testData.totalEmails,
+      sentSuccessfully: testData.sentSuccessfully,
+      failed: testData.failed,
+      emailsPerSecond: testData.emailsPerSecond || 0,
+      emailsPerMinute: Math.round((testData.emailsPerSecond || 0) * 60),
+      totalTime: new Date(testData.startTime).getTime(),
+      avgResponseTime: testData.avgResponseTime || 0,
+      maxResponseTime: testData.maxResponseTime || 0,
+      minResponseTime: testData.minResponseTime || 0,
+      progress: testData.progress || 0,
+      activeThreads: currentTest?.threads || 0,
+      errors: testData.errors || [],
+      smtpResponses: testData.smtpResponses || [],
+    });
+
+    // Update chart data if test is active
+    if (testData.status === 'running') {
+      const currentTime = new Date().toLocaleTimeString();
+      setChartData(prevChart => {
+        const newData = [...prevChart, {
+          time: currentTime,
+          sent: testData.sentSuccessfully,
+          errors: testData.failed,
+          responseTime: testData.avgResponseTime || 0
+        }];
+        return newData.slice(-20); // Keep last 20 data points
+      });
+    }
+  };
+
+  // Simulate real-time data updates for running tests
   useEffect(() => {
     if (testStatus === 'running' && currentTest) {
       const interval = setInterval(() => {
@@ -38,7 +86,7 @@ const LoadTestResults = ({ currentTest, testStatus }: LoadTestResultsProps) => {
           const newSent = prev.sentSuccessfully + Math.floor(Math.random() * 5) + 1;
           const newFailed = prev.failed + (Math.random() > 0.9 ? 1 : 0);
           const totalSent = newSent + newFailed;
-          const totalTarget = currentTest.threads * currentTest.emailsPerThread * currentTest.recipients.length;
+          const totalTarget = currentTest.totalEmails || (currentTest.threads * currentTest.emailsPerThread * currentTest.recipients.length);
           const progress = Math.min((totalSent / totalTarget) * 100, 100);
           
           const currentTime = new Date().toLocaleTimeString();
@@ -52,36 +100,10 @@ const LoadTestResults = ({ currentTest, testStatus }: LoadTestResultsProps) => {
               errors: newFailed,
               responseTime: newResponseTime
             }];
-            return newData.slice(-20); // Keep last 20 data points
+            return newData.slice(-20);
           });
 
-          // Add random SMTP responses
-          if (Math.random() > 0.7) {
-            const responses = prev.smtpResponses.slice(-10);
-            responses.push({
-              timestamp: currentTime,
-              response: Math.random() > 0.8 ? '550 Mailbox unavailable' : '250 Message accepted',
-              status: Math.random() > 0.8 ? 'error' : 'success'
-            });
-            
-            return {
-              ...prev,
-              sentSuccessfully: newSent,
-              failed: newFailed,
-              totalEmails: totalSent,
-              progress,
-              emailsPerSecond: Math.round(totalSent / ((Date.now() - (prev.totalTime || Date.now())) / 1000 || 1)),
-              emailsPerMinute: Math.round(totalSent / ((Date.now() - (prev.totalTime || Date.now())) / 60000 || 1) * 60),
-              totalTime: prev.totalTime || Date.now(),
-              avgResponseTime: Math.round((prev.avgResponseTime * (totalSent - 1) + newResponseTime) / totalSent),
-              maxResponseTime: Math.max(prev.maxResponseTime, newResponseTime),
-              minResponseTime: prev.minResponseTime === 0 ? newResponseTime : Math.min(prev.minResponseTime, newResponseTime),
-              activeThreads: currentTest.threads,
-              smtpResponses: responses
-            };
-          }
-
-          return {
+          const updatedResults = {
             ...prev,
             sentSuccessfully: newSent,
             failed: newFailed,
@@ -95,6 +117,25 @@ const LoadTestResults = ({ currentTest, testStatus }: LoadTestResultsProps) => {
             minResponseTime: prev.minResponseTime === 0 ? newResponseTime : Math.min(prev.minResponseTime, newResponseTime),
             activeThreads: currentTest.threads,
           };
+
+          // Update global state
+          testStateService.updateTestProgress({
+            id: 'current',
+            configId: currentTest.id || '',
+            status: 'running',
+            startTime: new Date(prev.totalTime || Date.now()),
+            totalEmails: totalSent,
+            sentSuccessfully: newSent,
+            failed: newFailed,
+            emailsPerSecond: updatedResults.emailsPerSecond,
+            avgResponseTime: updatedResults.avgResponseTime,
+            maxResponseTime: updatedResults.maxResponseTime,
+            minResponseTime: updatedResults.minResponseTime,
+            errors: prev.errors,
+            smtpResponses: prev.smtpResponses
+          });
+
+          return updatedResults;
         });
       }, 1000);
 
@@ -173,6 +214,9 @@ const LoadTestResults = ({ currentTest, testStatus }: LoadTestResultsProps) => {
               <div>
                 <p className="text-green-300 text-sm">Emails Sent</p>
                 <p className="text-2xl font-bold text-white">{results.sentSuccessfully}</p>
+                <p className="text-xs text-green-400">
+                  {results.totalEmails > 0 ? Math.round((results.sentSuccessfully / results.totalEmails) * 100) : 0}% success rate
+                </p>
               </div>
               <CheckCircle className="w-8 h-8 text-green-400" />
             </div>
@@ -185,6 +229,9 @@ const LoadTestResults = ({ currentTest, testStatus }: LoadTestResultsProps) => {
               <div>
                 <p className="text-red-300 text-sm">Failed</p>
                 <p className="text-2xl font-bold text-white">{results.failed}</p>
+                <p className="text-xs text-red-400">
+                  {results.totalEmails > 0 ? Math.round((results.failed / results.totalEmails) * 100) : 0}% failure rate
+                </p>
               </div>
               <XCircle className="w-8 h-8 text-red-400" />
             </div>
@@ -197,6 +244,7 @@ const LoadTestResults = ({ currentTest, testStatus }: LoadTestResultsProps) => {
               <div>
                 <p className="text-blue-300 text-sm">Emails/Second</p>
                 <p className="text-2xl font-bold text-white">{results.emailsPerSecond}</p>
+                <p className="text-xs text-blue-400">Current throughput</p>
               </div>
               <Zap className="w-8 h-8 text-blue-400" />
             </div>
@@ -208,7 +256,10 @@ const LoadTestResults = ({ currentTest, testStatus }: LoadTestResultsProps) => {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-purple-300 text-sm">Avg Response</p>
-                <p className="text-2xl font-bold text-white">{results.avgResponseTime}ms</p>
+                <p className="text-2xl font-bold text-white">{Math.round(results.avgResponseTime)}ms</p>
+                <p className="text-xs text-purple-400">
+                  Min: {Math.round(results.minResponseTime)}ms, Max: {Math.round(results.maxResponseTime)}ms
+                </p>
               </div>
               <Clock className="w-8 h-8 text-purple-400" />
             </div>
@@ -324,31 +375,55 @@ const LoadTestResults = ({ currentTest, testStatus }: LoadTestResultsProps) => {
         </CardContent>
       </Card>
 
-      {/* SMTP Responses */}
+      {/* SMTP Responses with better error visibility */}
       <Card className="bg-slate-800/50 border-slate-700 backdrop-blur-sm">
         <CardHeader>
           <div className="flex items-center gap-2">
             <AlertTriangle className="w-5 h-5 text-yellow-400" />
-            <CardTitle className="text-white">Recent SMTP Responses</CardTitle>
+            <CardTitle className="text-white">Recent SMTP Responses & Errors</CardTitle>
           </div>
         </CardHeader>
         <CardContent>
-          <div className="space-y-2 max-h-40 overflow-y-auto">
-            {results.smtpResponses.length === 0 ? (
-              <p className="text-slate-400 text-sm">No SMTP responses yet...</p>
-            ) : (
-              results.smtpResponses.slice(-10).reverse().map((response, index) => (
-                <div key={index} className="flex items-center justify-between py-2 px-3 bg-slate-700/50 rounded text-sm">
-                  <div className="flex items-center gap-2">
-                    <div className={`w-2 h-2 rounded-full ${response.status === 'success' ? 'bg-green-400' : 'bg-red-400'}`} />
-                    <span className="text-slate-300">{response.timestamp}</span>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* Success Responses */}
+            <div>
+              <h4 className="text-green-400 font-medium mb-3">Successful Responses</h4>
+              <div className="space-y-2 max-h-40 overflow-y-auto">
+                {results.smtpResponses.filter(r => r.status === 'success').slice(-5).reverse().map((response, index) => (
+                  <div key={index} className="p-2 bg-green-900/20 border border-green-800/30 rounded text-sm">
+                    <div className="flex items-center justify-between">
+                      <span className="text-green-400 text-xs">{response.timestamp}</span>
+                      <CheckCircle className="w-3 h-3 text-green-400" />
+                    </div>
+                    <code className="text-green-300 text-xs">{response.response}</code>
                   </div>
-                  <code className={`text-xs px-2 py-1 rounded ${response.status === 'success' ? 'bg-green-900/30 text-green-300' : 'bg-red-900/30 text-red-300'}`}>
-                    {response.response}
-                  </code>
-                </div>
-              ))
-            )}
+                ))}
+                {results.smtpResponses.filter(r => r.status === 'success').length === 0 && (
+                  <p className="text-slate-400 text-sm">No successful responses yet</p>
+                )}
+              </div>
+            </div>
+
+            {/* Error Responses */}
+            <div>
+              <h4 className="text-red-400 font-medium mb-3">Failed Responses</h4>
+              <div className="space-y-2 max-h-40 overflow-y-auto">
+                {results.errors.slice(-5).reverse().map((error, index) => (
+                  <div key={index} className="p-2 bg-red-900/20 border border-red-800/30 rounded text-sm">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-red-400 text-xs">{error.recipient}</span>
+                      <span className="text-slate-400 text-xs">
+                        {new Date(error.timestamp).toLocaleTimeString()}
+                      </span>
+                    </div>
+                    <code className="text-red-300 text-xs">{error.error}</code>
+                  </div>
+                ))}
+                {results.errors.length === 0 && (
+                  <p className="text-slate-400 text-sm">No errors recorded</p>
+                )}
+              </div>
+            </div>
           </div>
         </CardContent>
       </Card>

@@ -1,35 +1,16 @@
+
 import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { History, Search, Download, Trash2, Eye, Calendar, Mail, Clock, TrendingUp, AlertTriangle } from "lucide-react";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { History, Eye, Trash2, Clock, CheckCircle, XCircle, Server, Mail, AlertTriangle } from "lucide-react";
 import { testHistoryService } from '@/services/TestHistoryService';
 import { toast } from "@/hooks/use-toast";
 
-interface TestRecord {
-  id: string;
-  timestamp: string;
-  server: string;
-  port: string;
-  recipients: number;
-  threads: number;
-  emailsPerThread: number;
-  totalEmails: number;
-  sentSuccessfully: number;
-  failed: number;
-  duration: number;
-  avgResponseTime: number;
-  status: 'completed' | 'failed' | 'cancelled';
-  subject: string;
-}
-
 const TestHistory = () => {
-  const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [dateFilter, setDateFilter] = useState('all');
-  const [testHistory, setTestHistory] = useState<TestRecord[]>([]);
+  const [testHistory, setTestHistory] = useState<any[]>([]);
+  const [selectedTest, setSelectedTest] = useState<any>(null);
 
   useEffect(() => {
     loadTestHistory();
@@ -37,43 +18,8 @@ const TestHistory = () => {
 
   const loadTestHistory = () => {
     const history = testHistoryService.getTestHistory();
-    const formattedHistory = history.map(test => ({
-      id: test.id,
-      timestamp: new Date(test.timestamp).toLocaleString(),
-      server: test.server,
-      port: test.port,
-      recipients: test.totalEmails, // Using totalEmails as recipients count
-      threads: 1, // Default value since it's not stored
-      emailsPerThread: test.totalEmails, // Default value
-      totalEmails: test.totalEmails,
-      sentSuccessfully: test.sentSuccessfully,
-      failed: test.failed,
-      duration: test.endTime ? Math.floor((new Date(test.endTime).getTime() - new Date(test.startTime).getTime()) / 1000) : 0,
-      avgResponseTime: test.avgResponseTime,
-      status: test.status as 'completed' | 'failed' | 'cancelled',
-      subject: test.subject
-    }));
-    setTestHistory(formattedHistory);
+    setTestHistory(history);
   };
-
-  const filteredTests = testHistory.filter(test => {
-    const matchesSearch = test.server.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         test.subject.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         test.id.toLowerCase().includes(searchTerm.toLowerCase());
-    
-    const matchesStatus = statusFilter === 'all' || test.status === statusFilter;
-    
-    const testDate = new Date(test.timestamp);
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-    
-    const matchesDate = dateFilter === 'all' || 
-                       (dateFilter === 'today' && testDate >= today) ||
-                       (dateFilter === 'week' && testDate >= weekAgo);
-    
-    return matchesSearch && matchesStatus && matchesDate;
-  });
 
   const handleClearHistory = () => {
     testHistoryService.clearHistory();
@@ -86,271 +32,262 @@ const TestHistory = () => {
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'completed': return 'bg-green-600 hover:bg-green-700';
-      case 'failed': return 'bg-red-600 hover:bg-red-700';
-      case 'cancelled': return 'bg-yellow-600 hover:bg-yellow-700';
-      default: return 'bg-slate-600 hover:bg-slate-700';
+      case 'completed': return 'text-green-400 bg-green-500/20 border-green-400/30';
+      case 'running': return 'text-blue-400 bg-blue-500/20 border-blue-400/30';
+      case 'paused': return 'text-yellow-400 bg-yellow-500/20 border-yellow-400/30';
+      case 'failed': return 'text-red-400 bg-red-500/20 border-red-400/30';
+      default: return 'text-slate-400 bg-slate-500/20 border-slate-400/30';
     }
   };
 
-  const formatDuration = (seconds: number) => {
-    if (seconds === 0) return 'N/A';
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    const secs = seconds % 60;
+  const formatDuration = (startTime: string, endTime?: string) => {
+    const start = new Date(startTime);
+    const end = endTime ? new Date(endTime) : new Date();
+    const duration = Math.round((end.getTime() - start.getTime()) / 1000);
     
-    if (hours > 0) return `${hours}h ${minutes}m ${secs}s`;
-    if (minutes > 0) return `${minutes}m ${secs}s`;
-    return `${secs}s`;
+    if (duration < 60) return `${duration}s`;
+    if (duration < 3600) return `${Math.round(duration / 60)}m ${duration % 60}s`;
+    return `${Math.round(duration / 3600)}h ${Math.round((duration % 3600) / 60)}m`;
   };
 
-  const calculateSuccessRate = (successful: number, total: number) => {
-    if (total === 0) return 0;
-    return Math.round((successful / total) * 100);
-  };
+  const TestDetails = ({ test }: { test: any }) => (
+    <div className="space-y-6">
+      {/* Test Overview */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="bg-slate-700/50 p-4 rounded-lg">
+          <div className="flex items-center gap-2 mb-2">
+            <Mail className="w-4 h-4 text-blue-400" />
+            <span className="text-slate-400 text-sm">Total Emails</span>
+          </div>
+          <div className="text-2xl font-bold text-white">{test.totalEmails.toLocaleString()}</div>
+        </div>
+        
+        <div className="bg-slate-700/50 p-4 rounded-lg">
+          <div className="flex items-center gap-2 mb-2">
+            <CheckCircle className="w-4 h-4 text-green-400" />
+            <span className="text-slate-400 text-sm">Successful</span>
+          </div>
+          <div className="text-2xl font-bold text-green-400">{test.sentSuccessfully.toLocaleString()}</div>
+        </div>
+        
+        <div className="bg-slate-700/50 p-4 rounded-lg">
+          <div className="flex items-center gap-2 mb-2">
+            <XCircle className="w-4 h-4 text-red-400" />
+            <span className="text-slate-400 text-sm">Failed</span>
+          </div>
+          <div className="text-2xl font-bold text-red-400">{test.failed.toLocaleString()}</div>
+        </div>
+        
+        <div className="bg-slate-700/50 p-4 rounded-lg">
+          <div className="flex items-center gap-2 mb-2">
+            <Clock className="w-4 h-4 text-purple-400" />
+            <span className="text-slate-400 text-sm">Success Rate</span>
+          </div>
+          <div className="text-2xl font-bold text-white">
+            {test.totalEmails > 0 ? Math.round((test.sentSuccessfully / test.totalEmails) * 100) : 0}%
+          </div>
+        </div>
+      </div>
+
+      {/* Performance Metrics */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="bg-slate-700/50 p-4 rounded-lg">
+          <h4 className="text-white font-medium mb-2">Performance</h4>
+          <div className="space-y-2 text-sm">
+            <div className="flex justify-between">
+              <span className="text-slate-400">Emails/Second:</span>
+              <span className="text-white">{test.emailsPerSecond?.toFixed(1) || '0.0'}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Avg Response:</span>
+              <span className="text-white">{Math.round(test.avgResponseTime || 0)}ms</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Max Response:</span>
+              <span className="text-white">{Math.round(test.maxResponseTime || 0)}ms</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Min Response:</span>
+              <span className="text-white">{Math.round(test.minResponseTime || 0)}ms</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-slate-700/50 p-4 rounded-lg">
+          <h4 className="text-white font-medium mb-2">Server Details</h4>
+          <div className="space-y-2 text-sm">
+            <div className="flex justify-between">
+              <span className="text-slate-400">Server:</span>
+              <span className="text-white">{test.server}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Port:</span>
+              <span className="text-white">{test.port}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Subject:</span>
+              <span className="text-white truncate max-w-32" title={test.subject}>
+                {test.subject}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-slate-700/50 p-4 rounded-lg">
+          <h4 className="text-white font-medium mb-2">Timing</h4>
+          <div className="space-y-2 text-sm">
+            <div className="flex justify-between">
+              <span className="text-slate-400">Started:</span>
+              <span className="text-white">
+                {new Date(test.startTime).toLocaleTimeString()}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Ended:</span>
+              <span className="text-white">
+                {test.endTime ? new Date(test.endTime).toLocaleTimeString() : 'N/A'}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Duration:</span>
+              <span className="text-white">
+                {formatDuration(test.startTime, test.endTime)}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Recent Errors */}
+      {test.errors && test.errors.length > 0 && (
+        <div className="bg-slate-700/50 p-4 rounded-lg">
+          <h4 className="text-white font-medium mb-3 flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-red-400" />
+            Recent Errors ({test.errors.length})
+          </h4>
+          <div className="space-y-2 max-h-40 overflow-y-auto">
+            {test.errors.slice(-10).map((error: any, index: number) => (
+              <div key={index} className="p-2 bg-red-900/20 border border-red-800/30 rounded text-sm">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-red-400">{error.recipient}</span>
+                  <span className="text-slate-400 text-xs">
+                    {new Date(error.timestamp).toLocaleTimeString()}
+                  </span>
+                </div>
+                <code className="text-red-300 text-xs">{error.error}</code>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  if (testHistory.length === 0) {
+    return (
+      <Card className="bg-slate-800/50 border-slate-700 backdrop-blur-sm">
+        <CardContent className="flex items-center justify-center h-64">
+          <div className="text-center text-slate-400">
+            <History className="w-12 h-12 mx-auto mb-4 opacity-50" />
+            <p className="text-lg mb-2">No test history available</p>
+            <p className="text-sm">Run some tests to see the history here</p>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <div className="space-y-6">
       {/* Header */}
-      <Card className="bg-slate-800/50 border-slate-700 backdrop-blur-sm">
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <History className="w-5 h-5 text-blue-400" />
-              <CardTitle className="text-white">Test History</CardTitle>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" className="border-slate-600">
-                <Download className="w-4 h-4 mr-2" />
-                Export
-              </Button>
-              <Button 
-                variant="outline" 
-                size="sm" 
-                className="border-slate-600 text-red-400 hover:text-red-300"
-                onClick={handleClearHistory}
-              >
-                <Trash2 className="w-4 h-4 mr-2" />
-                Clear All
-              </Button>
-            </div>
-          </div>
-          <CardDescription className="text-slate-400">
-            View and analyze previous SMTP load test results ({testHistory.length} tests stored locally)
-          </CardDescription>
-        </CardHeader>
-      </Card>
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-bold text-white mb-2">Test History</h2>
+          <p className="text-slate-400">{testHistory.length} test(s) recorded</p>
+        </div>
+        <Button
+          variant="destructive"
+          size="sm"
+          onClick={handleClearHistory}
+          className="flex items-center gap-2"
+        >
+          <Trash2 className="w-4 h-4" />
+          Clear History
+        </Button>
+      </div>
 
-      {/* Filters */}
-      <Card className="bg-slate-800/50 border-slate-700 backdrop-blur-sm">
-        <CardContent className="p-4">
-          <div className="flex flex-col md:flex-row gap-4">
-            <div className="flex-1">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-slate-400" />
-                <Input
-                  placeholder="Search by server, subject, or test ID..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10 bg-slate-700 border-slate-600 text-white"
-                />
-              </div>
-            </div>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-40 bg-slate-700 border-slate-600 text-white">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Status</SelectItem>
-                <SelectItem value="completed">Completed</SelectItem>
-                <SelectItem value="failed">Failed</SelectItem>
-                <SelectItem value="cancelled">Cancelled</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select value={dateFilter} onValueChange={setDateFilter}>
-              <SelectTrigger className="w-40 bg-slate-700 border-slate-600 text-white">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Time</SelectItem>
-                <SelectItem value="today">Today</SelectItem>
-                <SelectItem value="week">This Week</SelectItem>
-                <SelectItem value="month">This Month</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Test Records */}
+      {/* Test History List */}
       <div className="space-y-4">
-        {filteredTests.length === 0 ? (
-          <Card className="bg-slate-800/50 border-slate-700 backdrop-blur-sm">
-            <CardContent className="flex items-center justify-center h-32">
-              <div className="text-center text-slate-400">
-                <History className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                <p>
-                  {testHistory.length === 0 
-                    ? "No test records found. Run a test to see history here." 
-                    : "No test records found matching your criteria"
-                  }
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-        ) : (
-          filteredTests.map((test) => (
-            <Card key={test.id} className="bg-slate-800/50 border-slate-700 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-200">
-              <CardContent className="p-6">
-                <div className="flex items-start justify-between mb-4">
-                  <div className="flex items-center gap-4">
-                    <div className="flex flex-col">
-                      <div className="flex items-center gap-2">
-                        <h3 className="text-lg font-semibold text-white">{test.subject}</h3>
-                        <Badge className={getStatusColor(test.status)}>
-                          {test.status.charAt(0).toUpperCase() + test.status.slice(1)}
-                        </Badge>
-                      </div>
-                      <div className="flex items-center gap-2 text-slate-400 text-sm mt-1">
-                        <Calendar className="w-4 h-4" />
-                        <span>{test.timestamp}</span>
-                        <span>•</span>
-                        <span>ID: {test.id}</span>
-                      </div>
+        {testHistory.map((test, index) => (
+          <Card key={test.id} className="bg-slate-800/50 border-slate-700 backdrop-blur-sm">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div className="flex-1">
+                  <div className="flex items-center gap-4 mb-3">
+                    <Badge className={`px-2 py-1 text-xs ${getStatusColor(test.status)}`}>
+                      {test.status}
+                    </Badge>
+                    <div className="flex items-center gap-2 text-slate-400 text-sm">
+                      <Server className="w-4 h-4" />
+                      <span>{test.server}:{test.port}</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-slate-400 text-sm">
+                      <Clock className="w-4 h-4" />
+                      <span>{new Date(test.timestamp).toLocaleString()}</span>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Button variant="outline" size="sm" className="border-slate-600">
-                      <Eye className="w-4 h-4 mr-2" />
-                      View Details
-                    </Button>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4 mb-4">
-                  <div className="text-center">
-                    <div className="text-slate-400 text-xs">Server</div>
-                    <div className="text-white font-semibold text-sm">{test.server}</div>
-                    <div className="text-slate-500 text-xs">Port {test.port}</div>
-                  </div>
-                  <div className="text-center">
-                    <div className="text-slate-400 text-xs">Recipients</div>
-                    <div className="text-white font-semibold">{test.totalEmails.toLocaleString()}</div>
-                  </div>
-                  <div className="text-center">
-                    <div className="text-slate-400 text-xs">Configuration</div>
-                    <div className="text-white font-semibold">{test.threads}T × {test.emailsPerThread}E</div>
-                  </div>
-                  <div className="text-center">
-                    <div className="text-slate-400 text-xs">Total Emails</div>
-                    <div className="text-white font-semibold">{test.totalEmails.toLocaleString()}</div>
-                  </div>
-                  <div className="text-center">
-                    <div className="text-slate-400 text-xs">Success Rate</div>
-                    <div className={`font-semibold ${test.status === 'completed' ? 
-                      calculateSuccessRate(test.sentSuccessfully, test.totalEmails) >= 95 ? 'text-green-400' : 
-                      calculateSuccessRate(test.sentSuccessfully, test.totalEmails) >= 90 ? 'text-yellow-400' : 'text-red-400'
-                      : 'text-slate-400'}`}>
-                      {test.status === 'completed' ? `${calculateSuccessRate(test.sentSuccessfully, test.totalEmails)}%` : 'N/A'}
+                  
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                    <div>
+                      <span className="text-slate-400">Total: </span>
+                      <span className="text-white font-semibold">{test.totalEmails.toLocaleString()}</span>
                     </div>
-                  </div>
-                  <div className="text-center">
-                    <div className="text-slate-400 text-xs">Duration</div>
-                    <div className="text-white font-semibold">{formatDuration(test.duration)}</div>
-                  </div>
-                  <div className="text-center">
-                    <div className="text-slate-400 text-xs">Avg Response</div>
-                    <div className="text-white font-semibold">
-                      {test.avgResponseTime > 0 ? `${test.avgResponseTime}ms` : 'N/A'}
-                    </div>
-                  </div>
-                </div>
-
-                {test.status === 'completed' && (
-                  <div className="grid grid-cols-3 gap-4 pt-4 border-t border-slate-700">
-                    <div className="flex items-center gap-2">
-                      <TrendingUp className="w-4 h-4 text-green-400" />
-                      <span className="text-slate-400 text-sm">Successful:</span>
+                    <div>
+                      <span className="text-slate-400">Success: </span>
                       <span className="text-green-400 font-semibold">{test.sentSuccessfully.toLocaleString()}</span>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <AlertTriangle className="w-4 h-4 text-red-400" />
-                      <span className="text-slate-400 text-sm">Failed:</span>
+                    <div>
+                      <span className="text-slate-400">Failed: </span>
                       <span className="text-red-400 font-semibold">{test.failed.toLocaleString()}</span>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Clock className="w-4 h-4 text-blue-400" />
-                      <span className="text-slate-400 text-sm">Rate:</span>
-                      <span className="text-blue-400 font-semibold">
-                        {test.duration > 0 ? Math.round(test.totalEmails / test.duration * 60) : 0}/min
+                    <div>
+                      <span className="text-slate-400">Rate: </span>
+                      <span className="text-white font-semibold">
+                        {test.totalEmails > 0 ? Math.round((test.sentSuccessfully / test.totalEmails) * 100) : 0}%
                       </span>
                     </div>
                   </div>
-                )}
-
-                {test.status === 'failed' && (
-                  <div className="pt-4 border-t border-slate-700">
-                    <div className="flex items-center gap-2 text-red-400">
-                      <AlertTriangle className="w-4 h-4" />
-                      <span className="text-sm">This test failed to complete due to configuration or connection issues</span>
-                    </div>
-                  </div>
-                )}
-
-                {test.status === 'cancelled' && (
-                  <div className="pt-4 border-t border-slate-700">
-                    <div className="flex items-center gap-2 text-yellow-400">
-                      <AlertTriangle className="w-4 h-4" />
-                      <span className="text-sm">This test was manually cancelled before completion</span>
-                    </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          ))
-        )}
+                </div>
+                
+                <Dialog>
+                  <DialogTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="ml-4"
+                      onClick={() => setSelectedTest(test)}
+                    >
+                      <Eye className="w-4 h-4 mr-2" />
+                      View Details
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto bg-slate-900 border-slate-700">
+                    <DialogHeader>
+                      <DialogTitle className="text-white">
+                        Test Details - {new Date(test.timestamp).toLocaleString()}
+                      </DialogTitle>
+                      <DialogDescription className="text-slate-400">
+                        Complete test results and performance metrics
+                      </DialogDescription>
+                    </DialogHeader>
+                    {selectedTest && <TestDetails test={selectedTest} />}
+                  </DialogContent>
+                </Dialog>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
       </div>
-
-      {/* Summary Stats */}
-      {filteredTests.length > 0 && (
-        <Card className="bg-slate-800/50 border-slate-700 backdrop-blur-sm">
-          <CardHeader>
-            <CardTitle className="text-white">Summary Statistics</CardTitle>
-            <CardDescription className="text-slate-400">
-              Aggregate statistics for displayed test records
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="text-center">
-                <div className="text-slate-400 text-sm">Total Tests</div>
-                <div className="text-2xl font-bold text-white">{filteredTests.length}</div>
-              </div>
-              <div className="text-center">
-                <div className="text-slate-400 text-sm">Completed</div>
-                <div className="text-2xl font-bold text-green-400">
-                  {filteredTests.filter(t => t.status === 'completed').length}
-                </div>
-              </div>
-              <div className="text-center">
-                <div className="text-slate-400 text-sm">Total Emails</div>
-                <div className="text-2xl font-bold text-white">
-                  {filteredTests.reduce((sum, test) => sum + test.totalEmails, 0).toLocaleString()}
-                </div>
-              </div>
-              <div className="text-center">
-                <div className="text-slate-400 text-sm">Avg Success Rate</div>
-                <div className="text-2xl font-bold text-blue-400">
-                  {Math.round(filteredTests
-                    .filter(t => t.status === 'completed' && t.totalEmails > 0)
-                    .reduce((sum, test, _, arr) => sum + calculateSuccessRate(test.sentSuccessfully, test.totalEmails) / arr.length, 0)
-                  )}%
-                </div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
     </div>
   );
 };

@@ -9,6 +9,7 @@ import LoadTestResults from '@/components/LoadTestResults';
 import Dashboard from '@/components/Dashboard';
 import TestHistory from '@/components/TestHistory';
 import { testHistoryService } from '@/services/TestHistoryService';
+import { testStateService } from '@/services/TestStateService';
 import { toast } from "@/hooks/use-toast";
 
 const Index = () => {
@@ -28,8 +29,27 @@ const Index = () => {
     setTestStatus('running');
     setActiveTab('results');
     
-    // Simulate a test run for demo purposes
-    simulateTestRun(config);
+    // Create initial test result and update global state
+    const testResult = {
+      id: `test_${Date.now()}`,
+      configId: config.id || '',
+      status: 'running' as const,
+      startTime: new Date(),
+      totalEmails: 0,
+      sentSuccessfully: 0,
+      failed: 0,
+      emailsPerSecond: 0,
+      avgResponseTime: 0,
+      maxResponseTime: 0,
+      minResponseTime: 0,
+      errors: [],
+      smtpResponses: []
+    };
+
+    testStateService.setCurrentTest(testResult);
+    
+    // Simulate test completion for demo
+    simulateTestRun(config, testResult);
     
     toast({
       title: "Test Started",
@@ -37,29 +57,29 @@ const Index = () => {
     });
   };
 
-  const simulateTestRun = (config: any) => {
-    // Create a mock test result for demonstration
-    const mockResult = {
-      id: `test_${Date.now()}`,
-      configId: config.id || '',
-      status: 'completed' as const,
-      startTime: new Date(),
-      endTime: new Date(Date.now() + 30000), // 30 seconds later
-      totalEmails: config.totalEmails || config.threads * config.emailsPerThread,
-      sentSuccessfully: Math.floor((config.totalEmails || config.threads * config.emailsPerThread) * 0.95),
-      failed: Math.floor((config.totalEmails || config.threads * config.emailsPerThread) * 0.05),
-      emailsPerSecond: 15.5,
-      avgResponseTime: 245,
-      maxResponseTime: 850,
-      minResponseTime: 120,
-      errors: [],
-      smtpResponses: []
-    };
-
-    // Simulate test completion after a delay
+  const simulateTestRun = (config: any, initialResult: any) => {
+    // Calculate total emails based on configuration
+    const totalEmails = config.totalEmails || (config.threads * (config.emailsPerThread || 10));
+    
     setTimeout(() => {
+      const completedResult = {
+        ...initialResult,
+        status: 'completed' as const,
+        endTime: new Date(),
+        totalEmails: totalEmails,
+        sentSuccessfully: Math.floor(totalEmails * 0.95),
+        failed: Math.floor(totalEmails * 0.05),
+        emailsPerSecond: 15.5,
+        avgResponseTime: 245,
+        maxResponseTime: 850,
+        minResponseTime: 120,
+        errors: [],
+        smtpResponses: []
+      };
+
       setTestStatus('completed');
-      testHistoryService.saveTestResult(mockResult, config);
+      testStateService.updateTestProgress(completedResult);
+      testHistoryService.saveTestResult(completedResult, config);
       
       toast({
         title: "Test Completed",
@@ -70,6 +90,14 @@ const Index = () => {
 
   const handleStopTest = () => {
     setTestStatus('completed');
+    const currentTestData = testStateService.getCurrentState().currentTest;
+    if (currentTestData) {
+      testStateService.updateTestProgress({
+        ...currentTestData,
+        status: 'completed',
+        endTime: new Date()
+      });
+    }
   };
 
   const handlePauseTest = () => {

@@ -1,4 +1,3 @@
-
 import nodemailer from 'nodemailer';
 import { SMTPConfig, TestResult, ErrorLog, SMTPResponse, ThreadResult } from '../types';
 import { EventEmitter } from 'events';
@@ -12,6 +11,8 @@ export class SMTPTester extends EventEmitter {
   private startTime: Date;
   private threads: Array<{ id: number; queue: async.QueueObject<any> }> = [];
   private endTime?: Date;
+  private consecutiveErrors: number = 0;
+  private maxConsecutiveErrors: number = 50; // Stop only after many consecutive errors
 
   constructor(config: SMTPConfig) {
     super();
@@ -97,6 +98,12 @@ export class SMTPTester extends EventEmitter {
   }
 
   private shouldStopTest(): boolean {
+    // Check for too many consecutive errors
+    if (this.consecutiveErrors >= this.maxConsecutiveErrors) {
+      console.log(`Stopping test due to ${this.consecutiveErrors} consecutive errors`);
+      return true;
+    }
+
     if (this.config.testMode === 'count' && this.config.totalEmails) {
       return this.result.totalEmails >= this.config.totalEmails;
     }
@@ -231,6 +238,9 @@ export class SMTPTester extends EventEmitter {
       const info = await transporter.sendMail(mailOptions);
       const responseTime = Date.now() - sendStartTime;
 
+      // Reset consecutive errors on success
+      this.consecutiveErrors = 0;
+
       this.result.sentSuccessfully++;
       this.result.totalEmails++;
       
@@ -256,6 +266,7 @@ export class SMTPTester extends EventEmitter {
 
     } catch (error) {
       const responseTime = Date.now() - sendStartTime;
+      this.consecutiveErrors++;
       this.handleError(error as Error, recipient, threadId, responseTime);
     }
   }
@@ -302,12 +313,15 @@ export class SMTPTester extends EventEmitter {
       this.updateResponseTimes(responseTime);
     }
 
+    // Only emit error, don't stop the test immediately
     this.emit('error', {
       testId: this.result.id,
       type: 'error',
       data: errorLog,
       timestamp: new Date()
     });
+
+    console.log(`Error sending to ${recipient}: ${error.message} (consecutive errors: ${this.consecutiveErrors})`);
   }
 
   private keepRecentResponses() {

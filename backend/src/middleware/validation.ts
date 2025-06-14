@@ -1,51 +1,69 @@
 
+import { body, validationResult } from 'express-validator';
 import { Request, Response, NextFunction } from 'express';
-import Joi from 'joi';
 
-export const validateSMTPConfig = (req: Request, res: Response, next: NextFunction) => {
-  const schema = Joi.object({
-    server: Joi.string().required(),
-    port: Joi.number().integer().min(1).max(65535).required(),
-    username: Joi.string().allow(''),
-    password: Joi.string().allow(''),
-    fromEmail: Joi.string().email().allow(''),
-    useAuth: Joi.boolean().required(),
-    useSSL: Joi.boolean().required(),
-    subject: Joi.string().required(),
-    message: Joi.string().required(),
-    recipients: Joi.array().items(Joi.string().email()).min(1).required(),
-    threads: Joi.number().integer().min(1).max(100).required(),
-    emailsPerThread: Joi.number().integer().min(1).max(1000).required(),
-    delay: Joi.number().integer().min(0).required(),
-    attachmentPath: Joi.string().optional(),
-    customHeaders: Joi.object().pattern(Joi.string(), Joi.string()).optional(),
-    testMode: Joi.string().valid('count', 'duration', 'continuous').required(),
-    totalEmails: Joi.when('testMode', {
-      is: 'count',
-      then: Joi.number().integer().min(1).required(),
-      otherwise: Joi.number().integer().min(1).optional()
-    }),
-    duration: Joi.when('testMode', {
-      is: 'duration',
-      then: Joi.number().integer().min(1).required(),
-      otherwise: Joi.number().integer().min(1).optional()
-    })
-  });
-
-  const { error } = schema.validate(req.body);
-  if (error) {
-    return res.status(400).json({ error: error.details[0].message });
-  }
-
-  next();
-};
-
-export const validateTestId = (req: Request, res: Response, next: NextFunction) => {
-  const { testId } = req.params;
+export const validateSMTPConfig = [
+  body('server').notEmpty().withMessage('Server is required'),
+  body('port').isInt({ min: 1, max: 65535 }).withMessage('Port must be between 1 and 65535'),
+  body('username').optional().isString(),
+  body('password').optional().isString(),
+  body('fromEmail').optional().isEmail().withMessage('From email must be valid'),
+  body('useSSL').isBoolean().withMessage('SSL option must be boolean'),
+  body('useAuth').isBoolean().withMessage('Auth option must be boolean'),
+  body('recipients').isArray({ min: 1 }).withMessage('At least one recipient is required'),
+  body('recipients.*').isEmail().withMessage('All recipients must be valid emails'),
+  body('subject').notEmpty().withMessage('Subject is required'),
+  body('message').notEmpty().withMessage('Message is required'),
+  body('threads').isInt({ min: 1, max: 100 }).withMessage('Threads must be between 1 and 100'),
+  body('emailsPerThread').optional().isInt({ min: 1 }).withMessage('Emails per thread must be positive'),
+  body('totalEmails').optional().isInt({ min: 1 }).withMessage('Total emails must be positive'),
+  body('testMode').isIn(['count', 'duration', 'continuous']).withMessage('Invalid test mode'),
+  body('duration').optional().isInt({ min: 1 }).withMessage('Duration must be positive'),
+  body('delay').optional().isInt({ min: 0 }).withMessage('Delay must be non-negative'),
+  body('attachmentPath').optional().isString(),
+  body('customHeaders').optional().isObject().withMessage('Custom headers must be an object'),
   
-  if (!testId || typeof testId !== 'string') {
-    return res.status(400).json({ error: 'Valid test ID is required' });
-  }
+  // Custom validation to ensure proper test configuration
+  body().custom((value) => {
+    const { testMode, totalEmails, duration, emailsPerThread, threads } = value;
+    
+    if (testMode === 'count') {
+      // For count mode, we need either totalEmails or emailsPerThread
+      if (!totalEmails && !emailsPerThread) {
+        throw new Error('Count mode requires either totalEmails or emailsPerThread');
+      }
+      
+      // Calculate total if using emailsPerThread
+      if (emailsPerThread && !totalEmails) {
+        value.totalEmails = emailsPerThread * threads;
+      }
+    }
+    
+    if (testMode === 'duration' && !duration) {
+      throw new Error('Duration mode requires duration parameter');
+    }
+    
+    // Ensure no overlapping parameters
+    if (testMode === 'duration' && totalEmails) {
+      throw new Error('Duration mode should not specify totalEmails');
+    }
+    
+    if (testMode === 'continuous' && (totalEmails || duration)) {
+      throw new Error('Continuous mode should not specify totalEmails or duration');
+    }
+    
+    return true;
+  }),
+];
 
+export const handleValidationErrors = (req: Request, res: Response, next: NextFunction) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({
+      success: false,
+      message: 'Validation failed',
+      errors: errors.array()
+    });
+  }
   next();
 };
