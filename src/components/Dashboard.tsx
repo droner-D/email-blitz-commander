@@ -6,7 +6,6 @@ import { ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Respons
 import { TrendingUp, Mail, Clock, Gauge, Activity, AlertCircle, Server } from "lucide-react";
 import { testHistoryService } from '@/services/TestHistoryService';
 import { testStateService } from '@/services/TestStateService';
-import PerformanceInsights from './PerformanceInsights';
 
 const Dashboard = () => {
   const [timeRange, setTimeRange] = useState('24h');
@@ -19,6 +18,8 @@ const Dashboard = () => {
       const latestTest = testStateService.getLatestTestResults();
       if (latestTest) {
         setCurrentTestData(latestTest);
+        // Reload server stats when test data changes
+        loadServerStatistics();
       }
     });
 
@@ -35,8 +36,30 @@ const Dashboard = () => {
 
   const loadServerStatistics = () => {
     const testHistory = testHistoryService.getTestHistory();
+    const currentState = testStateService.getCurrentState();
     
-    if (testHistory.length === 0) {
+    // Include current/completed test data in server stats
+    const allTests = [...testHistory];
+    if (currentState.currentTest) {
+      // Create a test history compatible object from current test
+      const currentTestForStats = {
+        id: currentState.currentTest.id,
+        timestamp: currentState.currentTest.startTime,
+        config: {
+          server: 'Current Test Server', // This should come from the actual config
+          port: 587, // This should come from the actual config
+        },
+        result: currentState.currentTest,
+        server: 'Current Test Server',
+        port: 587,
+        totalEmails: currentState.currentTest.totalEmails,
+        sentSuccessfully: currentState.currentTest.sentSuccessfully,
+        failed: currentState.currentTest.failed,
+      };
+      allTests.push(currentTestForStats);
+    }
+
+    if (allTests.length === 0) {
       setServerStats([]);
       return;
     }
@@ -44,13 +67,13 @@ const Dashboard = () => {
     // Group tests by server and calculate statistics
     const serverMap = new Map();
     
-    testHistory.forEach(test => {
-      const serverKey = `${test.server}:${test.port}`;
+    allTests.forEach(test => {
+      const serverKey = `${test.server || test.config?.server || 'Unknown'}:${test.port || test.config?.port || 'Unknown'}`;
       
       if (!serverMap.has(serverKey)) {
         serverMap.set(serverKey, {
-          server: test.server,
-          port: test.port,
+          server: test.server || test.config?.server || 'Unknown',
+          port: test.port || test.config?.port || 'Unknown',
           totalEmails: 0,
           sentSuccessfully: 0,
           failed: 0,
@@ -59,9 +82,9 @@ const Dashboard = () => {
       }
       
       const serverData = serverMap.get(serverKey);
-      serverData.totalEmails += test.totalEmails;
-      serverData.sentSuccessfully += test.sentSuccessfully;
-      serverData.failed += test.failed;
+      serverData.totalEmails += test.totalEmails || test.result?.totalEmails || 0;
+      serverData.sentSuccessfully += test.sentSuccessfully || test.result?.sentSuccessfully || 0;
+      serverData.failed += test.failed || test.result?.failed || 0;
       serverData.testCount += 1;
     });
 
@@ -117,76 +140,6 @@ const Dashboard = () => {
             <SelectItem value="30d">Last 30 days</SelectItem>
           </SelectContent>
         </Select>
-      </div>
-
-      {/* Performance Insights */}
-      {currentTestData && (
-        <PerformanceInsights
-          totalSent={displayData.totalEmails}
-          successRate={successRate}
-          avgResponseTime={displayData.avgResponseTime}
-          peakRate={displayData.emailsPerSecond}
-          isActive={currentTestData.status === 'running'}
-        />
-      )}
-
-      {/* Key Metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card className="bg-gradient-to-br from-blue-600/20 to-blue-800/20 border-blue-700/50 backdrop-blur-sm">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-blue-300 text-sm">Total Sent</p>
-                <p className="text-2xl font-bold text-white">{displayData.totalEmails.toLocaleString()}</p>
-                <p className="text-xs text-slate-400">
-                  {currentTestData ? 'Current test' : 'No active test'}
-                </p>
-              </div>
-              <Mail className="w-8 h-8 text-blue-400" />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-gradient-to-br from-green-600/20 to-green-800/20 border-green-700/50 backdrop-blur-sm">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-green-300 text-sm">Success Rate</p>
-                <p className="text-2xl font-bold text-white">{successRate.toFixed(1)}%</p>
-                <p className="text-xs text-green-400">
-                  {displayData.sentSuccessfully} successful
-                </p>
-              </div>
-              <TrendingUp className="w-8 h-8 text-green-400" />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-gradient-to-br from-purple-600/20 to-purple-800/20 border-purple-700/50 backdrop-blur-sm">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-purple-300 text-sm">Avg Response</p>
-                <p className="text-2xl font-bold text-white">{Math.round(displayData.avgResponseTime)}ms</p>
-                <p className="text-xs text-purple-400">Server response</p>
-              </div>
-              <Clock className="w-8 h-8 text-purple-400" />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-gradient-to-br from-orange-600/20 to-orange-800/20 border-orange-700/50 backdrop-blur-sm">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-orange-300 text-sm">Email Rate</p>
-                <p className="text-2xl font-bold text-white">{displayData.emailsPerSecond.toFixed(1)}/sec</p>
-                <p className="text-xs text-orange-400">Current rate</p>
-              </div>
-              <Gauge className="w-8 h-8 text-orange-400" />
-            </div>
-          </CardContent>
-        </Card>
       </div>
 
       {/* Charts - only show if we have data */}

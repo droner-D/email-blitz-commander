@@ -13,16 +13,14 @@ export class SMTPTester extends EventEmitter {
   private endTime?: Date;
   private consecutiveErrors: number = 0;
   private maxConsecutiveErrors: number = 100;
-  private emailsPerThread: number = 0;
+  private emailsSentByThread: number[] = [];
 
   constructor(config: SMTPConfig) {
     super();
     this.config = config;
     
-    // Calculate emails per thread for count-based tests
-    if (config.testMode === 'count' && config.totalEmails) {
-      this.emailsPerThread = Math.ceil(config.totalEmails / config.threads);
-    }
+    // Initialize emails sent counter for each thread
+    this.emailsSentByThread = new Array(config.threads).fill(0);
 
     this.result = {
       id: require('uuid').v4(),
@@ -89,12 +87,14 @@ export class SMTPTester extends EventEmitter {
         }
 
         // Check if we should stop based on test mode
-        if (this.shouldStopTest()) {
+        if (this.shouldStopTest(i)) {
           return;
         }
 
         await this.sendEmail(task.recipient, i);
+        this.emailsSentByThread[i]++;
         
+        // Apply delay after sending email
         if (this.config.delay > 0) {
           await new Promise(resolve => setTimeout(resolve, this.config.delay));
         }
@@ -104,15 +104,26 @@ export class SMTPTester extends EventEmitter {
     }
   }
 
-  private shouldStopTest(): boolean {
-    // Only stop for critical errors, not for individual email failures
+  private shouldStopTest(threadId?: number): boolean {
+    // Check for critical errors
     if (this.consecutiveErrors >= this.maxConsecutiveErrors) {
       console.log(`Stopping test due to ${this.consecutiveErrors} consecutive errors - server may be down`);
       return true;
     }
 
+    // For count-based tests, check total emails sent
     if (this.config.testMode === 'count' && this.config.totalEmails) {
-      return this.result.totalEmails >= this.config.totalEmails;
+      if (this.result.totalEmails >= this.config.totalEmails) {
+        return true;
+      }
+      
+      // Also check if this specific thread has sent its share
+      if (threadId !== undefined) {
+        const emailsPerThread = Math.ceil(this.config.totalEmails / this.config.threads);
+        if (this.emailsSentByThread[threadId] >= emailsPerThread) {
+          return true;
+        }
+      }
     }
     
     if (this.config.testMode === 'duration' && this.endTime) {
@@ -127,7 +138,8 @@ export class SMTPTester extends EventEmitter {
     console.log(`Starting ${this.config.testMode} test with ${this.config.threads} threads`);
     
     if (this.config.testMode === 'count' && this.config.totalEmails) {
-      console.log(`Total emails: ${this.config.totalEmails}, Emails per thread: ${this.emailsPerThread}`);
+      const emailsPerThread = Math.ceil(this.config.totalEmails / this.config.threads);
+      console.log(`Total emails: ${this.config.totalEmails}, Emails per thread: ${emailsPerThread}`);
       await this.runCountBasedTest();
     } else if (this.config.testMode === 'duration') {
       await this.runDurationBasedTest();
@@ -142,17 +154,22 @@ export class SMTPTester extends EventEmitter {
 
   private async runCountBasedTest() {
     const totalEmails = this.config.totalEmails || 0;
-    let emailsSent = 0;
+    const emailsPerThread = Math.ceil(totalEmails / this.config.threads);
+    
+    console.log(`Running count-based test: ${totalEmails} emails total, ${emailsPerThread} per thread`);
 
-    console.log(`Running count-based test: ${totalEmails} emails total`);
-
-    while (emailsSent < totalEmails && this.isRunning) {
-      for (const recipient of this.config.recipients) {
-        if (emailsSent >= totalEmails || !this.isRunning) break;
-
-        const threadIndex = emailsSent % this.config.threads;
+    // Distribute emails evenly across threads
+    for (let threadIndex = 0; threadIndex < this.config.threads; threadIndex++) {
+      for (let emailIndex = 0; emailIndex < emailsPerThread && this.isRunning; emailIndex++) {
+        const globalEmailIndex = threadIndex * emailsPerThread + emailIndex;
+        
+        // Stop if we've reached the total email limit
+        if (globalEmailIndex >= totalEmails) {
+          break;
+        }
+        
+        const recipient = this.config.recipients[globalEmailIndex % this.config.recipients.length];
         this.threads[threadIndex].queue.push({ recipient });
-        emailsSent++;
       }
     }
 
@@ -164,12 +181,14 @@ export class SMTPTester extends EventEmitter {
     const endTime = this.endTime!;
     console.log(`Running duration-based test for ${this.config.duration} seconds`);
     
+    let emailIndex = 0;
     while (Date.now() < endTime.getTime() && this.isRunning) {
       for (const recipient of this.config.recipients) {
         if (Date.now() >= endTime.getTime() || !this.isRunning) break;
 
-        const threadIndex = this.result.totalEmails % this.config.threads;
+        const threadIndex = emailIndex % this.config.threads;
         this.threads[threadIndex].queue.push({ recipient });
+        emailIndex++;
       }
       
       // Small delay to prevent overwhelming the queue
@@ -186,7 +205,7 @@ export class SMTPTester extends EventEmitter {
 
     while (this.isRunning) {
       const recipient = this.config.recipients[emailIndex % this.config.recipients.length];
-      const threadIndex = this.result.totalEmails % this.config.threads;
+      const threadIndex = emailIndex % this.config.threads;
       
       this.threads[threadIndex].queue.push({ recipient });
       emailIndex++;
