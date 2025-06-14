@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Play, Upload, Users, Mail, Server, Lock, Clock, Layers } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 
@@ -16,6 +17,7 @@ interface SMTPConfig {
   port: string;
   username: string;
   password: string;
+  fromEmail: string;
   useAuth: boolean;
   useSSL: boolean;
   subject: string;
@@ -25,6 +27,9 @@ interface SMTPConfig {
   emailsPerThread: number;
   delay: number;
   attachment: File | null;
+  testMode: 'count' | 'duration' | 'continuous';
+  totalEmails?: number;
+  duration?: number;
 }
 
 interface SMTPConfigurationProps {
@@ -38,8 +43,9 @@ const SMTPConfiguration = ({ onStartTest, testStatus }: SMTPConfigurationProps) 
     port: '587',
     username: '',
     password: '',
-    useAuth: true,
-    useSSL: true,
+    fromEmail: '',
+    useAuth: false,
+    useSSL: false,
     subject: '',
     message: '',
     recipients: [],
@@ -47,6 +53,9 @@ const SMTPConfiguration = ({ onStartTest, testStatus }: SMTPConfigurationProps) 
     emailsPerThread: 10,
     delay: 1000,
     attachment: null,
+    testMode: 'count',
+    totalEmails: 100,
+    duration: 60,
   });
 
   const [recipientInput, setRecipientInput] = useState('');
@@ -111,6 +120,16 @@ const SMTPConfiguration = ({ onStartTest, testStatus }: SMTPConfigurationProps) 
     });
   };
 
+  const getTotalEstimatedEmails = () => {
+    if (config.testMode === 'count') {
+      return config.totalEmails || 0;
+    } else if (config.testMode === 'duration') {
+      const emailsPerSecond = config.delay > 0 ? 1000 / config.delay : 1000;
+      return Math.round((config.duration || 0) * emailsPerSecond * config.threads);
+    }
+    return 'Unlimited';
+  };
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
       {/* SMTP Server Configuration */}
@@ -150,6 +169,17 @@ const SMTPConfiguration = ({ onStartTest, testStatus }: SMTPConfigurationProps) 
                 </SelectContent>
               </Select>
             </div>
+          </div>
+
+          <div>
+            <Label htmlFor="fromEmail" className="text-slate-300">From Email Address</Label>
+            <Input
+              id="fromEmail"
+              value={config.fromEmail}
+              onChange={(e) => handleInputChange('fromEmail', e.target.value)}
+              placeholder="sender@domain.com"
+              className="bg-slate-700 border-slate-600 text-white"
+            />
           </div>
 
           <div className="flex items-center space-x-2">
@@ -335,44 +365,80 @@ const SMTPConfiguration = ({ onStartTest, testStatus }: SMTPConfigurationProps) 
               />
             </div>
             <div>
-              <Label htmlFor="emailsPerThread" className="text-slate-300">Emails per Thread</Label>
+              <Label htmlFor="delay" className="text-slate-300 flex items-center gap-2">
+                <Clock className="w-4 h-4" />
+                Delay Between Emails (ms)
+              </Label>
               <Input
-                id="emailsPerThread"
+                id="delay"
                 type="number"
-                min="1"
-                value={config.emailsPerThread}
-                onChange={(e) => handleInputChange('emailsPerThread', parseInt(e.target.value) || 1)}
+                min="0"
+                value={config.delay}
+                onChange={(e) => handleInputChange('delay', parseInt(e.target.value) || 0)}
                 className="bg-slate-700 border-slate-600 text-white"
               />
             </div>
           </div>
 
           <div>
-            <Label htmlFor="delay" className="text-slate-300 flex items-center gap-2">
-              <Clock className="w-4 h-4" />
-              Delay Between Emails (ms)
-            </Label>
-            <Input
-              id="delay"
-              type="number"
-              min="0"
-              value={config.delay}
-              onChange={(e) => handleInputChange('delay', parseInt(e.target.value) || 0)}
-              className="bg-slate-700 border-slate-600 text-white"
-            />
+            <Label className="text-slate-300">Test Duration Mode</Label>
+            <RadioGroup
+              value={config.testMode}
+              onValueChange={(value) => handleInputChange('testMode', value as 'count' | 'duration' | 'continuous')}
+              className="flex flex-col space-y-2 mt-2"
+            >
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="count" id="count" />
+                <Label htmlFor="count" className="text-slate-300">Total number of emails</Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="duration" id="duration" />
+                <Label htmlFor="duration" className="text-slate-300">Run for specific time</Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <RadioGroupItem value="continuous" id="continuous" />
+                <Label htmlFor="continuous" className="text-slate-300">Continuous until stopped</Label>
+              </div>
+            </RadioGroup>
           </div>
+
+          {config.testMode === 'count' && (
+            <div>
+              <Label htmlFor="totalEmails" className="text-slate-300">Total Emails to Send</Label>
+              <Input
+                id="totalEmails"
+                type="number"
+                min="1"
+                value={config.totalEmails || ''}
+                onChange={(e) => handleInputChange('totalEmails', parseInt(e.target.value) || 1)}
+                className="bg-slate-700 border-slate-600 text-white"
+              />
+            </div>
+          )}
+
+          {config.testMode === 'duration' && (
+            <div>
+              <Label htmlFor="duration" className="text-slate-300">Duration (seconds)</Label>
+              <Input
+                id="duration"
+                type="number"
+                min="1"
+                value={config.duration || ''}
+                onChange={(e) => handleInputChange('duration', parseInt(e.target.value) || 1)}
+                className="bg-slate-700 border-slate-600 text-white"
+              />
+            </div>
+          )}
 
           <div className="pt-4 border-t border-slate-700">
             <div className="grid grid-cols-2 gap-4 text-slate-300 text-sm">
               <div>
-                <span className="text-slate-400">Total Emails:</span>
-                <div className="font-semibold">{config.threads * config.emailsPerThread * config.recipients.length}</div>
+                <span className="text-slate-400">Estimated Emails:</span>
+                <div className="font-semibold">{getTotalEstimatedEmails()}</div>
               </div>
               <div>
-                <span className="text-slate-400">Estimated Duration:</span>
-                <div className="font-semibold">
-                  {Math.round((config.emailsPerThread * config.delay) / 1000)}s per thread
-                </div>
+                <span className="text-slate-400">Test Mode:</span>
+                <div className="font-semibold capitalize">{config.testMode}</div>
               </div>
             </div>
           </div>

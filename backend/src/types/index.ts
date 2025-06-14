@@ -1,19 +1,22 @@
-
 export interface SMTPConfig {
   id?: string;
   server: string;
   port: number;
   username?: string;
   password?: string;
+  fromEmail?: string;
   useAuth: boolean;
   useSSL: boolean;
   subject: string;
   message: string;
   recipients: string[];
   threads: number;
-  emailsPerThread: number;
+  emailsPerThread?: number;
   delay: number;
   attachmentPath?: string;
+  testMode: 'count' | 'duration' | 'continuous';
+  totalEmails?: number;
+  duration?: number;
 }
 
 export interface TestResult {

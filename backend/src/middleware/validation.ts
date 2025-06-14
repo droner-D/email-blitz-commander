@@ -8,14 +8,26 @@ export const validateSMTPConfig = (req: Request, res: Response, next: NextFuncti
     port: Joi.number().integer().min(1).max(65535).required(),
     username: Joi.string().allow(''),
     password: Joi.string().allow(''),
+    fromEmail: Joi.string().email().allow(''),
     useAuth: Joi.boolean().required(),
     useSSL: Joi.boolean().required(),
     subject: Joi.string().required(),
     message: Joi.string().required(),
     recipients: Joi.array().items(Joi.string().email()).min(1).required(),
     threads: Joi.number().integer().min(1).max(100).required(),
-    emailsPerThread: Joi.number().integer().min(1).required(),
-    delay: Joi.number().integer().min(0).required()
+    emailsPerThread: Joi.number().integer().min(1).optional(),
+    delay: Joi.number().integer().min(0).required(),
+    testMode: Joi.string().valid('count', 'duration', 'continuous').required(),
+    totalEmails: Joi.when('testMode', {
+      is: 'count',
+      then: Joi.number().integer().min(1).required(),
+      otherwise: Joi.number().integer().min(1).optional()
+    }),
+    duration: Joi.when('testMode', {
+      is: 'duration',
+      then: Joi.number().integer().min(1).required(),
+      otherwise: Joi.number().integer().min(1).optional()
+    })
   });
 
   const { error } = schema.validate(req.body);

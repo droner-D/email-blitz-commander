@@ -1,4 +1,3 @@
-
 import nodemailer from 'nodemailer';
 import { SMTPConfig, TestResult, ErrorLog, SMTPResponse, ThreadResult } from '../types';
 import { EventEmitter } from 'events';
@@ -11,6 +10,7 @@ export class SMTPTester extends EventEmitter {
   private isPaused: boolean = false;
   private startTime: Date;
   private threads: Array<{ id: number; queue: async.QueueObject<any> }> = [];
+  private endTime?: Date;
 
   constructor(config: SMTPConfig) {
     super();
@@ -31,6 +31,11 @@ export class SMTPTester extends EventEmitter {
       smtpResponses: []
     };
     this.startTime = new Date();
+
+    // Set end time for duration-based tests
+    if (config.testMode === 'duration' && config.duration) {
+      this.endTime = new Date(Date.now() + config.duration * 1000);
+    }
   }
 
   async start(): Promise<void> {
@@ -74,6 +79,11 @@ export class SMTPTester extends EventEmitter {
           await new Promise(resolve => setTimeout(resolve, 100));
         }
 
+        // Check if we should stop based on test mode
+        if (this.shouldStopTest()) {
+          return;
+        }
+
         await this.sendEmail(task.recipient, i);
         
         if (this.config.delay > 0) {
@@ -85,21 +95,88 @@ export class SMTPTester extends EventEmitter {
     }
   }
 
+  private shouldStopTest(): boolean {
+    if (this.config.testMode === 'count' && this.config.totalEmails) {
+      return this.result.totalEmails >= this.config.totalEmails;
+    }
+    
+    if (this.config.testMode === 'duration' && this.endTime) {
+      return Date.now() >= this.endTime.getTime();
+    }
+    
+    // For continuous mode, only stop when manually stopped
+    return false;
+  }
+
   private async startLoadTest() {
-    const totalTasks = this.config.recipients.length * this.config.emailsPerThread;
-    let taskCount = 0;
+    if (this.config.testMode === 'count' && this.config.totalEmails) {
+      // Send specific number of emails
+      await this.runCountBasedTest();
+    } else if (this.config.testMode === 'duration') {
+      // Run for specific duration
+      await this.runDurationBasedTest();
+    } else {
+      // Continuous mode
+      await this.runContinuousTest();
+    }
 
-    for (let emailIndex = 0; emailIndex < this.config.emailsPerThread; emailIndex++) {
+    if (this.isRunning) {
+      this.complete();
+    }
+  }
+
+  private async runCountBasedTest() {
+    const totalEmails = this.config.totalEmails || 0;
+    let emailsSent = 0;
+
+    while (emailsSent < totalEmails && this.isRunning) {
       for (const recipient of this.config.recipients) {
-        if (!this.isRunning) break;
+        if (emailsSent >= totalEmails || !this.isRunning) break;
 
-        const threadIndex = taskCount % this.config.threads;
+        const threadIndex = emailsSent % this.config.threads;
         this.threads[threadIndex].queue.push({ recipient });
-        taskCount++;
+        emailsSent++;
       }
     }
 
     // Wait for all threads to complete
+    await this.waitForThreadsToComplete();
+  }
+
+  private async runDurationBasedTest() {
+    const endTime = this.endTime!;
+    
+    while (Date.now() < endTime.getTime() && this.isRunning) {
+      for (const recipient of this.config.recipients) {
+        if (Date.now() >= endTime.getTime() || !this.isRunning) break;
+
+        const threadIndex = this.result.totalEmails % this.config.threads;
+        this.threads[threadIndex].queue.push({ recipient });
+      }
+    }
+
+    // Wait for remaining emails to be sent
+    await this.waitForThreadsToComplete();
+  }
+
+  private async runContinuousTest() {
+    let emailIndex = 0;
+
+    while (this.isRunning) {
+      const recipient = this.config.recipients[emailIndex % this.config.recipients.length];
+      const threadIndex = this.result.totalEmails % this.config.threads;
+      
+      this.threads[threadIndex].queue.push({ recipient });
+      emailIndex++;
+
+      // Small delay to prevent overwhelming the system
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+
+    await this.waitForThreadsToComplete();
+  }
+
+  private async waitForThreadsToComplete() {
     await Promise.all(this.threads.map(thread => 
       new Promise<void>(resolve => {
         if (thread.queue.idle()) {
@@ -109,10 +186,6 @@ export class SMTPTester extends EventEmitter {
         }
       })
     ));
-
-    if (this.isRunning) {
-      this.complete();
-    }
   }
 
   private async sendEmail(recipient: string, threadId: number): Promise<void> {
@@ -134,8 +207,10 @@ export class SMTPTester extends EventEmitter {
 
       const transporter = nodemailer.createTransporter(transportConfig);
 
+      const fromEmail = this.config.fromEmail || this.config.username || 'test@example.com';
+
       const mailOptions: any = {
-        from: this.config.username || 'test@example.com',
+        from: fromEmail,
         to: recipient,
         subject: this.config.subject,
         text: this.config.message,
@@ -242,10 +317,19 @@ export class SMTPTester extends EventEmitter {
     const runtime = (Date.now() - this.startTime.getTime()) / 1000;
     const emailsPerSecond = runtime > 0 ? this.result.totalEmails / runtime : 0;
 
+    let progress = 0;
+    if (this.config.testMode === 'count' && this.config.totalEmails) {
+      progress = (this.result.totalEmails / this.config.totalEmails) * 100;
+    } else if (this.config.testMode === 'duration' && this.config.duration) {
+      progress = Math.min((runtime / this.config.duration) * 100, 100);
+    } else {
+      progress = 0; // Continuous mode doesn't have progress
+    }
+
     return {
       ...this.result,
       emailsPerSecond: Math.round(emailsPerSecond * 100) / 100,
-      progress: (this.result.totalEmails / (this.config.recipients.length * this.config.emailsPerThread)) * 100
+      progress
     };
   }
 
