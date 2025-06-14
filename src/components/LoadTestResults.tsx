@@ -5,6 +5,7 @@ import { Progress } from "@/components/ui/progress";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
 import { Activity, Clock, CheckCircle, XCircle, Zap, Mail, TrendingUp, AlertTriangle } from "lucide-react";
 import { testStateService } from '@/services/TestStateService';
+import { ErrorLog, SMTPResponse } from '../../backend/src/types';
 
 interface LoadTestResultsProps {
   currentTest: any;
@@ -24,8 +25,8 @@ const LoadTestResults = ({ currentTest, testStatus }: LoadTestResultsProps) => {
     minResponseTime: 0,
     progress: 0,
     activeThreads: 0,
-    errors: [] as Array<{ timestamp: string; error: string; recipient: string }>,
-    smtpResponses: [] as Array<{ timestamp: string; response: string; status: 'success' | 'error' }>,
+    errors: [] as ErrorLog[],
+    smtpResponses: [] as SMTPResponse[],
   });
 
   const [chartData, setChartData] = useState<Array<{ time: string; sent: number; errors: number; responseTime: number }>>([]);
@@ -103,6 +104,31 @@ const LoadTestResults = ({ currentTest, testStatus }: LoadTestResultsProps) => {
             return newData.slice(-20);
           });
 
+          // Create properly typed error and response objects
+          const newErrors: ErrorLog[] = [];
+          const newResponses: SMTPResponse[] = [];
+
+          // Add a sample error if failed count increased
+          if (newFailed > prev.failed) {
+            newErrors.push({
+              timestamp: new Date(),
+              error: "SMTP connection timeout",
+              recipient: currentTest.recipients[Math.floor(Math.random() * currentTest.recipients.length)],
+              thread: Math.floor(Math.random() * currentTest.threads) + 1
+            });
+          }
+
+          // Add a sample success response
+          if (newSent > prev.sentSuccessfully) {
+            newResponses.push({
+              timestamp: new Date(),
+              response: "250 2.0.0 OK",
+              status: 'success' as const,
+              recipient: currentTest.recipients[Math.floor(Math.random() * currentTest.recipients.length)],
+              responseTime: newResponseTime
+            });
+          }
+
           const updatedResults = {
             ...prev,
             sentSuccessfully: newSent,
@@ -116,6 +142,8 @@ const LoadTestResults = ({ currentTest, testStatus }: LoadTestResultsProps) => {
             maxResponseTime: Math.max(prev.maxResponseTime, newResponseTime),
             minResponseTime: prev.minResponseTime === 0 ? newResponseTime : Math.min(prev.minResponseTime, newResponseTime),
             activeThreads: currentTest.threads,
+            errors: [...prev.errors, ...newErrors].slice(-10), // Keep last 10 errors
+            smtpResponses: [...prev.smtpResponses, ...newResponses].slice(-10), // Keep last 10 responses
           };
 
           // Update global state
@@ -131,8 +159,8 @@ const LoadTestResults = ({ currentTest, testStatus }: LoadTestResultsProps) => {
             avgResponseTime: updatedResults.avgResponseTime,
             maxResponseTime: updatedResults.maxResponseTime,
             minResponseTime: updatedResults.minResponseTime,
-            errors: prev.errors,
-            smtpResponses: prev.smtpResponses
+            errors: updatedResults.errors,
+            smtpResponses: updatedResults.smtpResponses
           });
 
           return updatedResults;
@@ -392,10 +420,12 @@ const LoadTestResults = ({ currentTest, testStatus }: LoadTestResultsProps) => {
                 {results.smtpResponses.filter(r => r.status === 'success').slice(-5).reverse().map((response, index) => (
                   <div key={index} className="p-2 bg-green-900/20 border border-green-800/30 rounded text-sm">
                     <div className="flex items-center justify-between">
-                      <span className="text-green-400 text-xs">{response.timestamp}</span>
+                      <span className="text-green-400 text-xs">{new Date(response.timestamp).toLocaleTimeString()}</span>
                       <CheckCircle className="w-3 h-3 text-green-400" />
                     </div>
+                    <div className="text-green-300 text-xs mb-1">To: {response.recipient}</div>
                     <code className="text-green-300 text-xs">{response.response}</code>
+                    <div className="text-green-400 text-xs mt-1">Response time: {Math.round(response.responseTime)}ms</div>
                   </div>
                 ))}
                 {results.smtpResponses.filter(r => r.status === 'success').length === 0 && (
@@ -411,11 +441,12 @@ const LoadTestResults = ({ currentTest, testStatus }: LoadTestResultsProps) => {
                 {results.errors.slice(-5).reverse().map((error, index) => (
                   <div key={index} className="p-2 bg-red-900/20 border border-red-800/30 rounded text-sm">
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-red-400 text-xs">{error.recipient}</span>
+                      <span className="text-red-400 text-xs">Thread {error.thread}</span>
                       <span className="text-slate-400 text-xs">
                         {new Date(error.timestamp).toLocaleTimeString()}
                       </span>
                     </div>
+                    <div className="text-red-300 text-xs mb-1">To: {error.recipient}</div>
                     <code className="text-red-300 text-xs">{error.error}</code>
                   </div>
                 ))}
