@@ -3,7 +3,8 @@ import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area } from 'recharts';
-import { TrendingUp, Mail, Clock, Gauge, Activity, AlertCircle } from "lucide-react";
+import { TrendingUp, Mail, Clock, Gauge, Activity, AlertCircle, Server } from "lucide-react";
+import { testHistoryService } from '@/services/TestHistoryService';
 
 const Dashboard = () => {
   const [timeRange, setTimeRange] = useState('24h');
@@ -11,7 +12,7 @@ const Dashboard = () => {
   const [intervalData, setIntervalData] = useState<Array<{ interval: string; sent: number; errors: number }>>([]);
   const [serverStats, setServerStats] = useState<Array<{ server: string; emails: number; success: number; failed: number }>>([]);
 
-  // Generate sample data
+  // Generate sample data and load actual server stats
   useEffect(() => {
     // Generate cumulative data
     const cumulative = [];
@@ -38,14 +39,52 @@ const Dashboard = () => {
     }
     setIntervalData(intervals);
 
-    // Generate server statistics
-    setServerStats([
-      { server: 'smtp.gmail.com', emails: 1250, success: 1190, failed: 60 },
-      { server: 'smtp.outlook.com', emails: 980, success: 965, failed: 15 },
-      { server: 'smtp.sendgrid.net', emails: 2100, success: 2085, failed: 15 },
-      { server: 'smtp.mailgun.org', emails: 750, success: 725, failed: 25 },
-    ]);
+    // Load actual server statistics from test history
+    loadServerStatistics();
   }, [timeRange]);
+
+  const loadServerStatistics = () => {
+    const testHistory = testHistoryService.getTestHistory();
+    
+    if (testHistory.length === 0) {
+      setServerStats([]);
+      return;
+    }
+
+    // Group tests by server and calculate statistics
+    const serverMap = new Map();
+    
+    testHistory.forEach(test => {
+      const serverKey = `${test.server}:${test.port}`;
+      
+      if (!serverMap.has(serverKey)) {
+        serverMap.set(serverKey, {
+          server: test.server,
+          port: test.port,
+          totalEmails: 0,
+          sentSuccessfully: 0,
+          failed: 0,
+          testCount: 0
+        });
+      }
+      
+      const serverData = serverMap.get(serverKey);
+      serverData.totalEmails += test.totalEmails;
+      serverData.sentSuccessfully += test.sentSuccessfully;
+      serverData.failed += test.failed;
+      serverData.testCount += 1;
+    });
+
+    // Convert to array format for display
+    const stats = Array.from(serverMap.values()).map(server => ({
+      server: `${server.server}:${server.port}`,
+      emails: server.totalEmails,
+      success: server.sentSuccessfully,
+      failed: server.failed
+    }));
+
+    setServerStats(stats);
+  };
 
   const pieData = [
     { name: 'Successful', value: 4965, color: '#10B981' },
@@ -268,51 +307,59 @@ const Dashboard = () => {
         </CardContent>
       </Card>
 
-      {/* Server Performance */}
+      {/* Server Performance - Now shows actual test results */}
       <Card className="bg-slate-800/50 border-slate-700 backdrop-blur-sm">
         <CardHeader>
           <div className="flex items-center gap-2">
-            <AlertCircle className="w-5 h-5 text-yellow-400" />
+            <Server className="w-5 h-5 text-cyan-400" />
             <CardTitle className="text-white">Server Performance</CardTitle>
           </div>
           <CardDescription className="text-slate-400">
-            Performance breakdown by SMTP server
+            Performance breakdown by SMTP server from recent tests
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="space-y-4">
-            {serverStats.map((server, index) => (
-              <div key={index} className="flex items-center justify-between p-4 bg-slate-700/50 rounded-lg">
-                <div className="flex items-center gap-4">
-                  <div className={`w-3 h-3 rounded-full ${server.failed / server.emails > 0.05 ? 'bg-red-400' : 'bg-green-400'}`} />
-                  <div>
-                    <p className="text-white font-semibold">{server.server}</p>
-                    <p className="text-slate-400 text-sm">
-                      {server.emails} total emails
-                    </p>
-                  </div>
-                </div>
-                <div className="text-right">
+          {serverStats.length === 0 ? (
+            <div className="text-center py-8">
+              <Server className="w-12 h-12 text-slate-600 mx-auto mb-4" />
+              <p className="text-slate-400 text-lg mb-2">No server data available</p>
+              <p className="text-slate-500 text-sm">Run some tests to see server performance statistics here</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {serverStats.map((server, index) => (
+                <div key={index} className="flex items-center justify-between p-4 bg-slate-700/50 rounded-lg border border-slate-600/30">
                   <div className="flex items-center gap-4">
-                    <div className="text-green-400">
-                      <div className="font-semibold">{server.success}</div>
-                      <div className="text-xs">Success</div>
+                    <div className={`w-3 h-3 rounded-full ${server.failed / server.emails > 0.05 ? 'bg-red-400' : 'bg-green-400'}`} />
+                    <div>
+                      <p className="text-white font-semibold">{server.server}</p>
+                      <p className="text-slate-400 text-sm">
+                        {server.emails.toLocaleString()} total emails
+                      </p>
                     </div>
-                    <div className="text-red-400">
-                      <div className="font-semibold">{server.failed}</div>
-                      <div className="text-xs">Failed</div>
-                    </div>
-                    <div className="text-white">
-                      <div className="font-semibold">
-                        {Math.round((server.success / server.emails) * 100)}%
+                  </div>
+                  <div className="text-right">
+                    <div className="flex items-center gap-6">
+                      <div className="text-emerald-400">
+                        <div className="font-semibold">{server.success.toLocaleString()}</div>
+                        <div className="text-xs">Success</div>
                       </div>
-                      <div className="text-xs text-slate-400">Rate</div>
+                      <div className="text-rose-400">
+                        <div className="font-semibold">{server.failed.toLocaleString()}</div>
+                        <div className="text-xs">Failed</div>
+                      </div>
+                      <div className="text-white">
+                        <div className="font-semibold">
+                          {Math.round((server.success / server.emails) * 100)}%
+                        </div>
+                        <div className="text-xs text-slate-400">Rate</div>
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>
