@@ -1,4 +1,3 @@
-
 import nodemailer from 'nodemailer';
 import { SMTPConfig, TestResult, ErrorLog, SMTPResponse, ThreadResult } from '../types';
 import { EventEmitter } from 'events';
@@ -13,11 +12,18 @@ export class SMTPTester extends EventEmitter {
   private threads: Array<{ id: number; queue: async.QueueObject<any> }> = [];
   private endTime?: Date;
   private consecutiveErrors: number = 0;
-  private maxConsecutiveErrors: number = 100; // Increased threshold to prevent premature stopping
+  private maxConsecutiveErrors: number = 100;
+  private emailsPerThread: number = 0;
 
   constructor(config: SMTPConfig) {
     super();
     this.config = config;
+    
+    // Calculate emails per thread for count-based tests
+    if (config.testMode === 'count' && config.totalEmails) {
+      this.emailsPerThread = Math.ceil(config.totalEmails / config.threads);
+    }
+
     this.result = {
       id: require('uuid').v4(),
       configId: config.id || '',
@@ -121,6 +127,7 @@ export class SMTPTester extends EventEmitter {
     console.log(`Starting ${this.config.testMode} test with ${this.config.threads} threads`);
     
     if (this.config.testMode === 'count' && this.config.totalEmails) {
+      console.log(`Total emails: ${this.config.totalEmails}, Emails per thread: ${this.emailsPerThread}`);
       await this.runCountBasedTest();
     } else if (this.config.testMode === 'duration') {
       await this.runDurationBasedTest();

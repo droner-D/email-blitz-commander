@@ -1,4 +1,3 @@
-
 import { useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -23,7 +22,6 @@ interface SMTPConfig {
   message: string;
   recipients: string[];
   threads: number;
-  emailsPerThread: number;
   delay: number;
   attachment: File | null;
   customHeaders: { [key: string]: string };
@@ -50,7 +48,6 @@ const SMTPConfiguration = ({ onStartTest, testStatus }: SMTPConfigurationProps) 
     message: '',
     recipients: [],
     threads: 1,
-    emailsPerThread: 10,
     delay: 1000,
     attachment: null,
     customHeaders: {},
@@ -142,10 +139,6 @@ const SMTPConfiguration = ({ onStartTest, testStatus }: SMTPConfigurationProps) 
     if (config.threads < 1 || config.threads > 100) {
       errors.push("Number of threads must be between 1 and 100");
     }
-    
-    if (config.emailsPerThread < 1) {
-      errors.push("Emails per thread must be at least 1");
-    }
 
     if (config.testMode === 'count') {
       if (!config.totalEmails || config.totalEmails < 1) {
@@ -157,11 +150,6 @@ const SMTPConfiguration = ({ onStartTest, testStatus }: SMTPConfigurationProps) 
       if (!config.duration || config.duration < 1) {
         errors.push("Duration must be at least 1 second for time-based tests");
       }
-    }
-
-    // Check for parameter conflicts
-    if (config.testMode === 'count' && config.totalEmails && config.threads * config.emailsPerThread > config.totalEmails * 2) {
-      errors.push("Thread configuration may send more emails than specified total. Consider adjusting threads or emails per thread.");
     }
 
     return errors;
@@ -179,36 +167,37 @@ const SMTPConfiguration = ({ onStartTest, testStatus }: SMTPConfigurationProps) 
       return;
     }
 
-    // Calculate actual total emails based on test mode
-    let actualTotalEmails = config.totalEmails;
-    if (config.testMode === 'duration') {
-      // For duration tests, estimate based on delay and threads
-      const emailsPerSecond = config.delay > 0 ? 1000 / config.delay : 10;
-      actualTotalEmails = Math.round(emailsPerSecond * config.threads * (config.duration || 60));
-    } else if (config.testMode === 'continuous') {
-      actualTotalEmails = undefined; // No limit for continuous
-    }
-
-    const finalConfig = {
-      ...config,
-      totalEmails: actualTotalEmails
-    };
-
-    onStartTest(finalConfig);
+    onStartTest(config);
     toast({
       title: "Test Started",
       description: `Load test initiated with ${config.threads} threads and ${config.recipients.length} recipients in ${config.testMode} mode.`,
     });
   };
 
-  const getTotalEstimatedEmails = () => {
-    if (config.testMode === 'count') {
-      return config.totalEmails || 0;
+  const getEmailsPerThread = () => {
+    if (config.testMode === 'count' && config.totalEmails) {
+      return Math.ceil(config.totalEmails / config.threads);
+    }
+    return 'N/A';
+  };
+
+  const getEstimatedDuration = () => {
+    if (config.testMode === 'count' && config.totalEmails) {
+      const emailsPerThread = Math.ceil(config.totalEmails / config.threads);
+      const totalTime = (emailsPerThread * config.delay) / 1000; // in seconds
+      return `~${Math.round(totalTime)}s`;
     } else if (config.testMode === 'duration') {
-      const emailsPerSecond = config.delay > 0 ? 1000 / config.delay : 10;
-      return Math.round((config.duration || 0) * emailsPerSecond * config.threads);
+      return `${config.duration}s`;
     }
     return 'Unlimited';
+  };
+
+  const getEstimatedEmailsForDuration = () => {
+    if (config.testMode === 'duration' && config.duration) {
+      const emailsPerSecond = config.delay > 0 ? 1000 / config.delay : 10;
+      return Math.round(emailsPerSecond * config.threads * config.duration);
+    }
+    return 'N/A';
   };
 
   return (
@@ -362,7 +351,6 @@ const SMTPConfiguration = ({ onStartTest, testStatus }: SMTPConfigurationProps) 
             </div>
           </div>
 
-          {/* Custom Headers Section */}
           <div>
             <Label className="text-slate-300">Custom Headers (Optional)</Label>
             <div className="space-y-2 mt-2">
@@ -471,7 +459,7 @@ const SMTPConfiguration = ({ onStartTest, testStatus }: SMTPConfigurationProps) 
         </CardContent>
       </Card>
 
-      {/* Load Testing Parameters */}
+      {/* Simplified Load Testing Parameters */}
       <Card className="bg-slate-800/50 border-slate-700 backdrop-blur-sm">
         <CardHeader>
           <div className="flex items-center gap-2">
@@ -483,7 +471,23 @@ const SMTPConfiguration = ({ onStartTest, testStatus }: SMTPConfigurationProps) 
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-3 gap-4">
+          {/* Test Mode Dropdown */}
+          <div>
+            <Label className="text-slate-300">Test Mode</Label>
+            <Select value={config.testMode} onValueChange={(value) => handleInputChange('testMode', value as 'count' | 'duration' | 'continuous')}>
+              <SelectTrigger className="bg-slate-700 border-slate-600 text-white">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="bg-slate-700 border-slate-600">
+                <SelectItem value="count">Send a specific number of emails</SelectItem>
+                <SelectItem value="duration">Run for a specific time</SelectItem>
+                <SelectItem value="continuous">Run continuously until manually stopped</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Basic Parameters */}
+          <div className="grid grid-cols-2 gap-4">
             <div>
               <Label htmlFor="threads" className="text-slate-300">Number of Threads</Label>
               <Input
@@ -495,18 +499,9 @@ const SMTPConfiguration = ({ onStartTest, testStatus }: SMTPConfigurationProps) 
                 onChange={(e) => handleInputChange('threads', parseInt(e.target.value) || 1)}
                 className="bg-slate-700 border-slate-600 text-white"
               />
-            </div>
-            <div>
-              <Label htmlFor="emailsPerThread" className="text-slate-300">Emails per Thread</Label>
-              <Input
-                id="emailsPerThread"
-                type="number"
-                min="1"
-                max="1000"
-                value={config.emailsPerThread}
-                onChange={(e) => handleInputChange('emailsPerThread', parseInt(e.target.value) || 1)}
-                className="bg-slate-700 border-slate-600 text-white"
-              />
+              <p className="text-xs text-slate-400 mt-1">
+                Parallel workers sending emails
+              </p>
             </div>
             <div>
               <Label htmlFor="delay" className="text-slate-300 flex items-center gap-2">
@@ -521,22 +516,10 @@ const SMTPConfiguration = ({ onStartTest, testStatus }: SMTPConfigurationProps) 
                 onChange={(e) => handleInputChange('delay', parseInt(e.target.value) || 0)}
                 className="bg-slate-700 border-slate-600 text-white"
               />
+              <p className="text-xs text-slate-400 mt-1">
+                Wait time between each email per thread
+              </p>
             </div>
-          </div>
-
-          {/* Test Mode Dropdown */}
-          <div>
-            <Label className="text-slate-300">Test Mode</Label>
-            <Select value={config.testMode} onValueChange={(value) => handleInputChange('testMode', value as 'count' | 'duration' | 'continuous')}>
-              <SelectTrigger className="bg-slate-700 border-slate-600 text-white">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent className="bg-slate-700 border-slate-600">
-                <SelectItem value="count">Send a specific number of emails</SelectItem>
-                <SelectItem value="duration">Run for a specific time</SelectItem>
-                <SelectItem value="continuous">Run continuously until manually stopped</SelectItem>
-              </SelectContent>
-            </Select>
           </div>
 
           {/* Conditional Inputs Based on Test Mode */}
@@ -553,7 +536,7 @@ const SMTPConfiguration = ({ onStartTest, testStatus }: SMTPConfigurationProps) 
                 placeholder="e.g., 1000"
               />
               <p className="text-xs text-slate-400 mt-1">
-                Note: Threads × Emails per Thread = {config.threads * config.emailsPerThread}
+                Emails per thread: {getEmailsPerThread()} | Estimated duration: {getEstimatedDuration()}
               </p>
             </div>
           )}
@@ -571,7 +554,7 @@ const SMTPConfiguration = ({ onStartTest, testStatus }: SMTPConfigurationProps) 
                 placeholder="e.g., 300 (5 minutes)"
               />
               <p className="text-xs text-slate-400 mt-1">
-                Estimated emails: ~{getTotalEstimatedEmails()} (based on delay and threads)
+                Estimated emails: ~{getEstimatedEmailsForDuration()} (based on delay and threads)
               </p>
             </div>
           )}
@@ -585,15 +568,16 @@ const SMTPConfiguration = ({ onStartTest, testStatus }: SMTPConfigurationProps) 
             </div>
           )}
 
+          {/* Summary */}
           <div className="pt-4 border-t border-slate-700">
             <div className="grid grid-cols-3 gap-4 text-slate-300 text-sm">
               <div>
-                <span className="text-slate-400">Estimated Emails:</span>
-                <div className="font-semibold">{getTotalEstimatedEmails()}</div>
-              </div>
-              <div>
                 <span className="text-slate-400">Test Mode:</span>
                 <div className="font-semibold capitalize">{config.testMode}</div>
+              </div>
+              <div>
+                <span className="text-slate-400">Threads:</span>
+                <div className="font-semibold">{config.threads}</div>
               </div>
               <div>
                 <span className="text-slate-400">Recipients:</span>

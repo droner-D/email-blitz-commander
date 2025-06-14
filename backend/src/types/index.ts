@@ -1,4 +1,3 @@
-
 export interface SMTPConfig {
   id?: string;
   server: string;
@@ -12,7 +11,6 @@ export interface SMTPConfig {
   message: string;
   recipients: string[];
   threads: number;
-  emailsPerThread?: number;
   delay: number;
   attachmentPath?: string;
   customHeaders?: { [key: string]: string };
