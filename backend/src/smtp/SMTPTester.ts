@@ -1,3 +1,4 @@
+
 import nodemailer from 'nodemailer';
 import { SMTPConfig, TestResult, ErrorLog, SMTPResponse, ThreadResult } from '../types';
 import { EventEmitter } from 'events';
@@ -215,6 +216,11 @@ export class SMTPTester extends EventEmitter {
         subject: this.config.subject,
         text: this.config.message,
       };
+
+      // Add custom headers if provided
+      if (this.config.customHeaders && Object.keys(this.config.customHeaders).length > 0) {
+        mailOptions.headers = this.config.customHeaders;
+      }
 
       if (this.config.attachmentPath) {
         mailOptions.attachments = [{

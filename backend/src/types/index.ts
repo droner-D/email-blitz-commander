@@ -1,3 +1,4 @@
+
 export interface SMTPConfig {
   id?: string;
   server: string;
@@ -14,6 +15,7 @@ export interface SMTPConfig {
   emailsPerThread?: number;
   delay: number;
   attachmentPath?: string;
+  customHeaders?: { [key: string]: string };
   testMode: 'count' | 'duration' | 'continuous';
   totalEmails?: number;
   duration?: number;

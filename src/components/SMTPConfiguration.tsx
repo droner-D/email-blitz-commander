@@ -1,4 +1,3 @@
-
 import { useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -9,7 +8,7 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Play, Upload, Users, Mail, Server, Lock, Clock, Layers } from "lucide-react";
+import { Play, Upload, Users, Mail, Server, Lock, Clock, Layers, Plus, X } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 
 interface SMTPConfig {
@@ -27,6 +26,7 @@ interface SMTPConfig {
   emailsPerThread: number;
   delay: number;
   attachment: File | null;
+  customHeaders: { [key: string]: string };
   testMode: 'count' | 'duration' | 'continuous';
   totalEmails?: number;
   duration?: number;
@@ -53,6 +53,7 @@ const SMTPConfiguration = ({ onStartTest, testStatus }: SMTPConfigurationProps) 
     emailsPerThread: 10,
     delay: 1000,
     attachment: null,
+    customHeaders: {},
     testMode: 'count',
     totalEmails: 100,
     duration: 60,
@@ -60,6 +61,8 @@ const SMTPConfiguration = ({ onStartTest, testStatus }: SMTPConfigurationProps) 
 
   const [recipientInput, setRecipientInput] = useState('');
   const [recipientFile, setRecipientFile] = useState<File | null>(null);
+  const [headerKey, setHeaderKey] = useState('');
+  const [headerValue, setHeaderValue] = useState('');
 
   const handleInputChange = (field: keyof SMTPConfig, value: any) => {
     setConfig(prev => ({ ...prev, [field]: value }));
@@ -101,6 +104,31 @@ const SMTPConfiguration = ({ onStartTest, testStatus }: SMTPConfigurationProps) 
     } else {
       setConfig(prev => ({ ...prev, attachment: file }));
     }
+  };
+
+  const addCustomHeader = () => {
+    if (headerKey.trim() && headerValue.trim() && !config.customHeaders[headerKey.trim()]) {
+      setConfig(prev => ({
+        ...prev,
+        customHeaders: {
+          ...prev.customHeaders,
+          [headerKey.trim()]: headerValue.trim()
+        }
+      }));
+      setHeaderKey('');
+      setHeaderValue('');
+    }
+  };
+
+  const removeCustomHeader = (key: string) => {
+    setConfig(prev => {
+      const newHeaders = { ...prev.customHeaders };
+      delete newHeaders[key];
+      return {
+        ...prev,
+        customHeaders: newHeaders
+      };
+    });
   };
 
   const handleStartTest = () => {
@@ -277,6 +305,57 @@ const SMTPConfiguration = ({ onStartTest, testStatus }: SMTPConfigurationProps) 
                 <Badge variant="secondary" className="bg-blue-600">
                   {config.attachment.name}
                 </Badge>
+              )}
+            </div>
+          </div>
+
+          {/* Custom Headers Section */}
+          <div>
+            <Label className="text-slate-300">Custom Headers (Optional)</Label>
+            <div className="space-y-2 mt-2">
+              <div className="flex gap-2">
+                <Input
+                  value={headerKey}
+                  onChange={(e) => setHeaderKey(e.target.value)}
+                  placeholder="Header name (e.g., X-Priority)"
+                  className="bg-slate-700 border-slate-600 text-white flex-1"
+                />
+                <Input
+                  value={headerValue}
+                  onChange={(e) => setHeaderValue(e.target.value)}
+                  placeholder="Header value"
+                  className="bg-slate-700 border-slate-600 text-white flex-1"
+                />
+                <Button 
+                  onClick={addCustomHeader} 
+                  variant="outline" 
+                  size="sm"
+                  className="border-slate-600 px-3"
+                >
+                  <Plus className="w-4 h-4" />
+                </Button>
+              </div>
+
+              {Object.entries(config.customHeaders).length > 0 && (
+                <div className="max-h-24 overflow-y-auto">
+                  <div className="space-y-1">
+                    {Object.entries(config.customHeaders).map(([key, value]) => (
+                      <div key={key} className="flex items-center justify-between bg-slate-700 p-2 rounded text-sm">
+                        <span className="text-slate-300">
+                          <span className="font-medium text-white">{key}:</span> {value}
+                        </span>
+                        <Button
+                          onClick={() => removeCustomHeader(key)}
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0 text-slate-400 hover:text-red-400"
+                        >
+                          <X className="w-3 h-3" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               )}
             </div>
           </div>

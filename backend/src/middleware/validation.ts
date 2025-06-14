@@ -17,6 +17,7 @@ export const validateSMTPConfig = (req: Request, res: Response, next: NextFuncti
     threads: Joi.number().integer().min(1).max(100).required(),
     emailsPerThread: Joi.number().integer().min(1).optional(),
     delay: Joi.number().integer().min(0).required(),
+    customHeaders: Joi.object().pattern(Joi.string(), Joi.string()).optional(),
     testMode: Joi.string().valid('count', 'duration', 'continuous').required(),
     totalEmails: Joi.when('testMode', {
       is: 'count',
