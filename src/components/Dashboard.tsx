@@ -40,25 +40,7 @@ const Dashboard = () => {
     
     // Include current/completed test data in server stats
     const allTests = [...testHistory];
-    if (currentState.currentTest) {
-      // Create a test history compatible object from current test
-      const currentTestForStats = {
-        id: currentState.currentTest.id,
-        timestamp: currentState.currentTest.startTime,
-        config: {
-          server: 'Current Test Server', // This should come from the actual config
-          port: 587, // This should come from the actual config
-        },
-        result: currentState.currentTest,
-        server: 'Current Test Server',
-        port: 587,
-        totalEmails: currentState.currentTest.totalEmails,
-        sentSuccessfully: currentState.currentTest.sentSuccessfully,
-        failed: currentState.currentTest.failed,
-      };
-      allTests.push(currentTestForStats);
-    }
-
+    
     if (allTests.length === 0) {
       setServerStats([]);
       return;
@@ -68,12 +50,12 @@ const Dashboard = () => {
     const serverMap = new Map();
     
     allTests.forEach(test => {
-      const serverKey = `${test.server || test.config?.server || 'Unknown'}:${test.port || test.config?.port || 'Unknown'}`;
+      const serverKey = `${test.server || 'Unknown'}:${test.port || 'Unknown'}`;
       
       if (!serverMap.has(serverKey)) {
         serverMap.set(serverKey, {
-          server: test.server || test.config?.server || 'Unknown',
-          port: test.port || test.config?.port || 'Unknown',
+          server: test.server || 'Unknown',
+          port: test.port || 'Unknown',
           totalEmails: 0,
           sentSuccessfully: 0,
           failed: 0,
@@ -82,9 +64,9 @@ const Dashboard = () => {
       }
       
       const serverData = serverMap.get(serverKey);
-      serverData.totalEmails += test.totalEmails || test.result?.totalEmails || 0;
-      serverData.sentSuccessfully += test.sentSuccessfully || test.result?.sentSuccessfully || 0;
-      serverData.failed += test.failed || test.result?.failed || 0;
+      serverData.totalEmails += test.totalEmails || 0;
+      serverData.sentSuccessfully += test.sentSuccessfully || 0;
+      serverData.failed += test.failed || 0;
       serverData.testCount += 1;
     });
 
