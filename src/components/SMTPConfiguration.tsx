@@ -1,3 +1,4 @@
+
 import { useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -7,7 +8,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Play, Upload, Users, Mail, Server, Lock, Clock, Layers, Plus, X } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 
@@ -131,20 +131,73 @@ const SMTPConfiguration = ({ onStartTest, testStatus }: SMTPConfigurationProps) 
     });
   };
 
+  const validateConfiguration = () => {
+    const errors = [];
+
+    if (!config.server) errors.push("SMTP server is required");
+    if (!config.subject) errors.push("Email subject is required");
+    if (!config.message) errors.push("Email message is required");
+    if (config.recipients.length === 0) errors.push("At least one recipient is required");
+    
+    if (config.threads < 1 || config.threads > 100) {
+      errors.push("Number of threads must be between 1 and 100");
+    }
+    
+    if (config.emailsPerThread < 1) {
+      errors.push("Emails per thread must be at least 1");
+    }
+
+    if (config.testMode === 'count') {
+      if (!config.totalEmails || config.totalEmails < 1) {
+        errors.push("Total emails must be at least 1 for count-based tests");
+      }
+    }
+
+    if (config.testMode === 'duration') {
+      if (!config.duration || config.duration < 1) {
+        errors.push("Duration must be at least 1 second for time-based tests");
+      }
+    }
+
+    // Check for parameter conflicts
+    if (config.testMode === 'count' && config.totalEmails && config.threads * config.emailsPerThread > config.totalEmails * 2) {
+      errors.push("Thread configuration may send more emails than specified total. Consider adjusting threads or emails per thread.");
+    }
+
+    return errors;
+  };
+
   const handleStartTest = () => {
-    if (!config.server || !config.subject || !config.message || config.recipients.length === 0) {
+    const validationErrors = validateConfiguration();
+    
+    if (validationErrors.length > 0) {
       toast({
         title: "Configuration Error",
-        description: "Please fill in all required fields and add at least one recipient.",
+        description: validationErrors.join(", "),
         variant: "destructive",
       });
       return;
     }
 
-    onStartTest(config);
+    // Calculate actual total emails based on test mode
+    let actualTotalEmails = config.totalEmails;
+    if (config.testMode === 'duration') {
+      // For duration tests, estimate based on delay and threads
+      const emailsPerSecond = config.delay > 0 ? 1000 / config.delay : 10;
+      actualTotalEmails = Math.round(emailsPerSecond * config.threads * (config.duration || 60));
+    } else if (config.testMode === 'continuous') {
+      actualTotalEmails = undefined; // No limit for continuous
+    }
+
+    const finalConfig = {
+      ...config,
+      totalEmails: actualTotalEmails
+    };
+
+    onStartTest(finalConfig);
     toast({
       title: "Test Started",
-      description: `Load test initiated with ${config.threads} threads and ${config.recipients.length} recipients.`,
+      description: `Load test initiated with ${config.threads} threads and ${config.recipients.length} recipients in ${config.testMode} mode.`,
     });
   };
 
@@ -152,7 +205,7 @@ const SMTPConfiguration = ({ onStartTest, testStatus }: SMTPConfigurationProps) 
     if (config.testMode === 'count') {
       return config.totalEmails || 0;
     } else if (config.testMode === 'duration') {
-      const emailsPerSecond = config.delay > 0 ? 1000 / config.delay : 1000;
+      const emailsPerSecond = config.delay > 0 ? 1000 / config.delay : 10;
       return Math.round((config.duration || 0) * emailsPerSecond * config.threads);
     }
     return 'Unlimited';
@@ -189,7 +242,7 @@ const SMTPConfiguration = ({ onStartTest, testStatus }: SMTPConfigurationProps) 
                 <SelectTrigger className="bg-slate-700 border-slate-600 text-white">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="bg-slate-700 border-slate-600">
                   <SelectItem value="25">25 (Standard)</SelectItem>
                   <SelectItem value="587">587 (TLS)</SelectItem>
                   <SelectItem value="465">465 (SSL)</SelectItem>
@@ -426,7 +479,7 @@ const SMTPConfiguration = ({ onStartTest, testStatus }: SMTPConfigurationProps) 
             <CardTitle className="text-white">Load Testing Parameters</CardTitle>
           </div>
           <CardDescription className="text-slate-400">
-            Configure the load testing behavior
+            Configure the load testing behavior and execution mode
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -471,28 +524,22 @@ const SMTPConfiguration = ({ onStartTest, testStatus }: SMTPConfigurationProps) 
             </div>
           </div>
 
+          {/* Test Mode Dropdown */}
           <div>
-            <Label className="text-slate-300">Test Duration Mode</Label>
-            <RadioGroup
-              value={config.testMode}
-              onValueChange={(value) => handleInputChange('testMode', value as 'count' | 'duration' | 'continuous')}
-              className="flex flex-col space-y-2 mt-2"
-            >
-              <div className="flex items-center space-x-2">
-                <RadioGroupItem value="count" id="count" />
-                <Label htmlFor="count" className="text-slate-300">Total number of emails</Label>
-              </div>
-              <div className="flex items-center space-x-2">
-                <RadioGroupItem value="duration" id="duration" />
-                <Label htmlFor="duration" className="text-slate-300">Run for specific time</Label>
-              </div>
-              <div className="flex items-center space-x-2">
-                <RadioGroupItem value="continuous" id="continuous" />
-                <Label htmlFor="continuous" className="text-slate-300">Continuous until stopped</Label>
-              </div>
-            </RadioGroup>
+            <Label className="text-slate-300">Test Mode</Label>
+            <Select value={config.testMode} onValueChange={(value) => handleInputChange('testMode', value as 'count' | 'duration' | 'continuous')}>
+              <SelectTrigger className="bg-slate-700 border-slate-600 text-white">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="bg-slate-700 border-slate-600">
+                <SelectItem value="count">Send a specific number of emails</SelectItem>
+                <SelectItem value="duration">Run for a specific time</SelectItem>
+                <SelectItem value="continuous">Run continuously until manually stopped</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
+          {/* Conditional Inputs Based on Test Mode */}
           {config.testMode === 'count' && (
             <div>
               <Label htmlFor="totalEmails" className="text-slate-300">Total Emails to Send</Label>
@@ -503,13 +550,17 @@ const SMTPConfiguration = ({ onStartTest, testStatus }: SMTPConfigurationProps) 
                 value={config.totalEmails || ''}
                 onChange={(e) => handleInputChange('totalEmails', parseInt(e.target.value) || 1)}
                 className="bg-slate-700 border-slate-600 text-white"
+                placeholder="e.g., 1000"
               />
+              <p className="text-xs text-slate-400 mt-1">
+                Note: Threads × Emails per Thread = {config.threads * config.emailsPerThread}
+              </p>
             </div>
           )}
 
           {config.testMode === 'duration' && (
             <div>
-              <Label htmlFor="duration" className="text-slate-300">Duration (seconds)</Label>
+              <Label htmlFor="duration" className="text-slate-300">Test Duration (seconds)</Label>
               <Input
                 id="duration"
                 type="number"
@@ -517,7 +568,20 @@ const SMTPConfiguration = ({ onStartTest, testStatus }: SMTPConfigurationProps) 
                 value={config.duration || ''}
                 onChange={(e) => handleInputChange('duration', parseInt(e.target.value) || 1)}
                 className="bg-slate-700 border-slate-600 text-white"
+                placeholder="e.g., 300 (5 minutes)"
               />
+              <p className="text-xs text-slate-400 mt-1">
+                Estimated emails: ~{getTotalEstimatedEmails()} (based on delay and threads)
+              </p>
+            </div>
+          )}
+
+          {config.testMode === 'continuous' && (
+            <div className="p-4 bg-yellow-900/20 border border-yellow-800/30 rounded">
+              <p className="text-yellow-300 text-sm">
+                ⚠️ Continuous mode will run indefinitely until manually stopped. 
+                Monitor your SMTP server limits and resources.
+              </p>
             </div>
           )}
 
@@ -528,12 +592,12 @@ const SMTPConfiguration = ({ onStartTest, testStatus }: SMTPConfigurationProps) 
                 <div className="font-semibold">{getTotalEstimatedEmails()}</div>
               </div>
               <div>
-                <span className="text-slate-400">Threads × Emails:</span>
-                <div className="font-semibold">{config.threads} × {config.emailsPerThread}</div>
-              </div>
-              <div>
                 <span className="text-slate-400">Test Mode:</span>
                 <div className="font-semibold capitalize">{config.testMode}</div>
+              </div>
+              <div>
+                <span className="text-slate-400">Recipients:</span>
+                <div className="font-semibold">{config.recipients.length}</div>
               </div>
             </div>
           </div>

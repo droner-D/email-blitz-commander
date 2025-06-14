@@ -1,3 +1,4 @@
+
 import nodemailer from 'nodemailer';
 import { SMTPConfig, TestResult, ErrorLog, SMTPResponse, ThreadResult } from '../types';
 import { EventEmitter } from 'events';
@@ -12,7 +13,7 @@ export class SMTPTester extends EventEmitter {
   private threads: Array<{ id: number; queue: async.QueueObject<any> }> = [];
   private endTime?: Date;
   private consecutiveErrors: number = 0;
-  private maxConsecutiveErrors: number = 50; // Stop only after many consecutive errors
+  private maxConsecutiveErrors: number = 100; // Increased threshold to prevent premature stopping
 
   constructor(config: SMTPConfig) {
     super();
@@ -98,9 +99,9 @@ export class SMTPTester extends EventEmitter {
   }
 
   private shouldStopTest(): boolean {
-    // Check for too many consecutive errors
+    // Only stop for critical errors, not for individual email failures
     if (this.consecutiveErrors >= this.maxConsecutiveErrors) {
-      console.log(`Stopping test due to ${this.consecutiveErrors} consecutive errors`);
+      console.log(`Stopping test due to ${this.consecutiveErrors} consecutive errors - server may be down`);
       return true;
     }
 
@@ -117,14 +118,13 @@ export class SMTPTester extends EventEmitter {
   }
 
   private async startLoadTest() {
+    console.log(`Starting ${this.config.testMode} test with ${this.config.threads} threads`);
+    
     if (this.config.testMode === 'count' && this.config.totalEmails) {
-      // Send specific number of emails
       await this.runCountBasedTest();
     } else if (this.config.testMode === 'duration') {
-      // Run for specific duration
       await this.runDurationBasedTest();
     } else {
-      // Continuous mode
       await this.runContinuousTest();
     }
 
@@ -137,6 +137,8 @@ export class SMTPTester extends EventEmitter {
     const totalEmails = this.config.totalEmails || 0;
     let emailsSent = 0;
 
+    console.log(`Running count-based test: ${totalEmails} emails total`);
+
     while (emailsSent < totalEmails && this.isRunning) {
       for (const recipient of this.config.recipients) {
         if (emailsSent >= totalEmails || !this.isRunning) break;
@@ -147,12 +149,13 @@ export class SMTPTester extends EventEmitter {
       }
     }
 
-    // Wait for all threads to complete
     await this.waitForThreadsToComplete();
+    console.log(`Count-based test completed: ${this.result.totalEmails} emails processed`);
   }
 
   private async runDurationBasedTest() {
     const endTime = this.endTime!;
+    console.log(`Running duration-based test for ${this.config.duration} seconds`);
     
     while (Date.now() < endTime.getTime() && this.isRunning) {
       for (const recipient of this.config.recipients) {
@@ -161,13 +164,17 @@ export class SMTPTester extends EventEmitter {
         const threadIndex = this.result.totalEmails % this.config.threads;
         this.threads[threadIndex].queue.push({ recipient });
       }
+      
+      // Small delay to prevent overwhelming the queue
+      await new Promise(resolve => setTimeout(resolve, 10));
     }
 
-    // Wait for remaining emails to be sent
     await this.waitForThreadsToComplete();
+    console.log(`Duration-based test completed: ${this.result.totalEmails} emails processed`);
   }
 
   private async runContinuousTest() {
+    console.log('Running continuous test - will run until manually stopped');
     let emailIndex = 0;
 
     while (this.isRunning) {
@@ -178,10 +185,11 @@ export class SMTPTester extends EventEmitter {
       emailIndex++;
 
       // Small delay to prevent overwhelming the system
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise(resolve => setTimeout(resolve, 50));
     }
 
     await this.waitForThreadsToComplete();
+    console.log(`Continuous test stopped: ${this.result.totalEmails} emails processed`);
   }
 
   private async waitForThreadsToComplete() {
@@ -204,6 +212,9 @@ export class SMTPTester extends EventEmitter {
         host: this.config.server,
         port: this.config.port,
         secure: this.config.useSSL,
+        connectionTimeout: 10000,
+        greetingTimeout: 10000,
+        socketTimeout: 10000,
       };
 
       if (this.config.useAuth) {
@@ -313,7 +324,7 @@ export class SMTPTester extends EventEmitter {
       this.updateResponseTimes(responseTime);
     }
 
-    // Only emit error, don't stop the test immediately
+    // Emit error but continue the test
     this.emit('error', {
       testId: this.result.id,
       type: 'error',
@@ -321,15 +332,18 @@ export class SMTPTester extends EventEmitter {
       timestamp: new Date()
     });
 
-    console.log(`Error sending to ${recipient}: ${error.message} (consecutive errors: ${this.consecutiveErrors})`);
+    // Only log warning for consecutive errors, don't stop unless critical
+    if (this.consecutiveErrors > 10) {
+      console.log(`Warning: ${this.consecutiveErrors} consecutive errors. Current error for ${recipient}: ${error.message}`);
+    }
   }
 
   private keepRecentResponses() {
-    if (this.result.smtpResponses.length > 50) {
-      this.result.smtpResponses = this.result.smtpResponses.slice(-50);
+    if (this.result.smtpResponses.length > 100) {
+      this.result.smtpResponses = this.result.smtpResponses.slice(-100);
     }
-    if (this.result.errors.length > 50) {
-      this.result.errors = this.result.errors.slice(-50);
+    if (this.result.errors.length > 100) {
+      this.result.errors = this.result.errors.slice(-100);
     }
   }
 
@@ -339,7 +353,7 @@ export class SMTPTester extends EventEmitter {
 
     let progress = 0;
     if (this.config.testMode === 'count' && this.config.totalEmails) {
-      progress = (this.result.totalEmails / this.config.totalEmails) * 100;
+      progress = Math.min((this.result.totalEmails / this.config.totalEmails) * 100, 100);
     } else if (this.config.testMode === 'duration' && this.config.duration) {
       progress = Math.min((runtime / this.config.duration) * 100, 100);
     } else {
@@ -356,18 +370,21 @@ export class SMTPTester extends EventEmitter {
   pause(): void {
     this.isPaused = true;
     this.result.status = 'paused';
+    console.log('Test paused');
     this.emit('pause', this.result);
   }
 
   resume(): void {
     this.isPaused = false;
     this.result.status = 'running';
+    console.log('Test resumed');
     this.emit('resume', this.result);
   }
 
   stop(): void {
     this.isRunning = false;
     this.threads.forEach(thread => thread.queue.kill());
+    console.log('Test stopped manually');
     this.complete();
   }
 
@@ -378,6 +395,7 @@ export class SMTPTester extends EventEmitter {
     const runtime = (this.result.endTime.getTime() - this.startTime.getTime()) / 1000;
     this.result.emailsPerSecond = runtime > 0 ? this.result.totalEmails / runtime : 0;
 
+    console.log(`Test completed: ${this.result.totalEmails} emails sent, ${this.result.sentSuccessfully} successful, ${this.result.failed} failed`);
     this.emit('complete', this.result);
   }
 

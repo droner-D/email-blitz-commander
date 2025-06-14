@@ -1,3 +1,4 @@
+
 import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -30,6 +31,10 @@ const LoadTestResults = ({ currentTest, testStatus }: LoadTestResultsProps) => {
   });
 
   const [chartData, setChartData] = useState<Array<{ time: string; sent: number; errors: number; responseTime: number }>>([]);
+  const [persistedResponses, setPersistedResponses] = useState<{
+    errors: ErrorLog[],
+    smtpResponses: SMTPResponse[]
+  }>({ errors: [], smtpResponses: [] });
 
   // Subscribe to global test state
   useEffect(() => {
@@ -42,6 +47,18 @@ const LoadTestResults = ({ currentTest, testStatus }: LoadTestResultsProps) => {
 
     return unsubscribe;
   }, []);
+
+  // Clear persisted responses when a new test starts
+  useEffect(() => {
+    if (testStatus === 'running' && currentTest) {
+      // Only clear if this is actually a new test start
+      const isNewTest = results.totalEmails === 0 || results.sentSuccessfully === 0;
+      if (isNewTest) {
+        setPersistedResponses({ errors: [], smtpResponses: [] });
+        setChartData([]);
+      }
+    }
+  }, [testStatus, currentTest]);
 
   const updateResultsFromTestData = (testData: any) => {
     const runtime = testData.endTime 
@@ -64,6 +81,21 @@ const LoadTestResults = ({ currentTest, testStatus }: LoadTestResultsProps) => {
       smtpResponses: testData.smtpResponses || [],
     });
 
+    // Update persisted responses when test data changes
+    if (testData.errors && testData.errors.length > 0) {
+      setPersistedResponses(prev => ({
+        ...prev,
+        errors: [...prev.errors, ...testData.errors].slice(-50) // Keep last 50
+      }));
+    }
+
+    if (testData.smtpResponses && testData.smtpResponses.length > 0) {
+      setPersistedResponses(prev => ({
+        ...prev,
+        smtpResponses: [...prev.smtpResponses, ...testData.smtpResponses].slice(-50) // Keep last 50
+      }));
+    }
+
     // Update chart data if test is active
     if (testData.status === 'running') {
       const currentTime = new Date().toLocaleTimeString();
@@ -84,11 +116,18 @@ const LoadTestResults = ({ currentTest, testStatus }: LoadTestResultsProps) => {
     if (testStatus === 'running' && currentTest) {
       const interval = setInterval(() => {
         setResults(prev => {
-          const newSent = prev.sentSuccessfully + Math.floor(Math.random() * 5) + 1;
-          const newFailed = prev.failed + (Math.random() > 0.9 ? 1 : 0);
+          const newSent = prev.sentSuccessfully + Math.floor(Math.random() * 3) + 1;
+          const newFailed = prev.failed + (Math.random() > 0.95 ? 1 : 0); // Less frequent failures
           const totalSent = newSent + newFailed;
-          const totalTarget = currentTest.totalEmails || (currentTest.threads * currentTest.emailsPerThread * currentTest.recipients.length);
-          const progress = Math.min((totalSent / totalTarget) * 100, 100);
+          
+          // Calculate progress based on test mode
+          let progress = 0;
+          if (currentTest.testMode === 'count' && currentTest.totalEmails) {
+            progress = Math.min((totalSent / currentTest.totalEmails) * 100, 100);
+          } else if (currentTest.testMode === 'duration' && currentTest.duration) {
+            const runtime = (Date.now() - (prev.totalTime || Date.now())) / 1000;
+            progress = Math.min((runtime / currentTest.duration) * 100, 100);
+          }
           
           const currentTime = new Date().toLocaleTimeString();
           const newResponseTime = 100 + Math.random() * 200;
@@ -110,23 +149,37 @@ const LoadTestResults = ({ currentTest, testStatus }: LoadTestResultsProps) => {
 
           // Add a sample error if failed count increased
           if (newFailed > prev.failed) {
-            newErrors.push({
+            const newError: ErrorLog = {
               timestamp: new Date(),
               error: "SMTP connection timeout",
               recipient: currentTest.recipients[Math.floor(Math.random() * currentTest.recipients.length)],
               thread: Math.floor(Math.random() * currentTest.threads) + 1
-            });
+            };
+            newErrors.push(newError);
+            
+            // Add to persisted responses
+            setPersistedResponses(persistedPrev => ({
+              ...persistedPrev,
+              errors: [...persistedPrev.errors, newError].slice(-50)
+            }));
           }
 
           // Add a sample success response
           if (newSent > prev.sentSuccessfully) {
-            newResponses.push({
+            const newResponse: SMTPResponse = {
               timestamp: new Date(),
               response: "250 2.0.0 OK",
               status: 'success' as const,
               recipient: currentTest.recipients[Math.floor(Math.random() * currentTest.recipients.length)],
               responseTime: newResponseTime
-            });
+            };
+            newResponses.push(newResponse);
+            
+            // Add to persisted responses
+            setPersistedResponses(persistedPrev => ({
+              ...persistedPrev,
+              smtpResponses: [...persistedPrev.smtpResponses, newResponse].slice(-50)
+            }));
           }
 
           const updatedResults = {
@@ -403,21 +456,26 @@ const LoadTestResults = ({ currentTest, testStatus }: LoadTestResultsProps) => {
         </CardContent>
       </Card>
 
-      {/* SMTP Responses with better error visibility */}
+      {/* SMTP Responses with retained data */}
       <Card className="bg-slate-800/50 border-slate-700 backdrop-blur-sm">
         <CardHeader>
           <div className="flex items-center gap-2">
             <AlertTriangle className="w-5 h-5 text-yellow-400" />
-            <CardTitle className="text-white">Recent SMTP Responses & Errors</CardTitle>
+            <CardTitle className="text-white">SMTP Responses & Errors (Retained)</CardTitle>
           </div>
+          <CardDescription className="text-slate-400">
+            All responses are retained until the next test starts
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {/* Success Responses */}
             <div>
-              <h4 className="text-green-400 font-medium mb-3">Successful Responses</h4>
-              <div className="space-y-2 max-h-40 overflow-y-auto">
-                {results.smtpResponses.filter(r => r.status === 'success').slice(-5).reverse().map((response, index) => (
+              <h4 className="text-green-400 font-medium mb-3">
+                Successful Responses ({persistedResponses.smtpResponses.filter(r => r.status === 'success').length})
+              </h4>
+              <div className="space-y-2 max-h-60 overflow-y-auto">
+                {persistedResponses.smtpResponses.filter(r => r.status === 'success').slice(-10).reverse().map((response, index) => (
                   <div key={index} className="p-2 bg-green-900/20 border border-green-800/30 rounded text-sm">
                     <div className="flex items-center justify-between">
                       <span className="text-green-400 text-xs">{new Date(response.timestamp).toLocaleTimeString()}</span>
@@ -428,7 +486,7 @@ const LoadTestResults = ({ currentTest, testStatus }: LoadTestResultsProps) => {
                     <div className="text-green-400 text-xs mt-1">Response time: {Math.round(response.responseTime)}ms</div>
                   </div>
                 ))}
-                {results.smtpResponses.filter(r => r.status === 'success').length === 0 && (
+                {persistedResponses.smtpResponses.filter(r => r.status === 'success').length === 0 && (
                   <p className="text-slate-400 text-sm">No successful responses yet</p>
                 )}
               </div>
@@ -436,9 +494,11 @@ const LoadTestResults = ({ currentTest, testStatus }: LoadTestResultsProps) => {
 
             {/* Error Responses */}
             <div>
-              <h4 className="text-red-400 font-medium mb-3">Failed Responses</h4>
-              <div className="space-y-2 max-h-40 overflow-y-auto">
-                {results.errors.slice(-5).reverse().map((error, index) => (
+              <h4 className="text-red-400 font-medium mb-3">
+                Failed Responses ({persistedResponses.errors.length})
+              </h4>
+              <div className="space-y-2 max-h-60 overflow-y-auto">
+                {persistedResponses.errors.slice(-10).reverse().map((error, index) => (
                   <div key={index} className="p-2 bg-red-900/20 border border-red-800/30 rounded text-sm">
                     <div className="flex items-center justify-between mb-1">
                       <span className="text-red-400 text-xs">Thread {error.thread}</span>
@@ -450,7 +510,7 @@ const LoadTestResults = ({ currentTest, testStatus }: LoadTestResultsProps) => {
                     <code className="text-red-300 text-xs">{error.error}</code>
                   </div>
                 ))}
-                {results.errors.length === 0 && (
+                {persistedResponses.errors.length === 0 && (
                   <p className="text-slate-400 text-sm">No errors recorded</p>
                 )}
               </div>
