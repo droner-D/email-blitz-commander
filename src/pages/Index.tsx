@@ -8,6 +8,8 @@ import SMTPConfiguration from '@/components/SMTPConfiguration';
 import LoadTestResults from '@/components/LoadTestResults';
 import Dashboard from '@/components/Dashboard';
 import TestHistory from '@/components/TestHistory';
+import { testHistoryService } from '@/services/TestHistoryService';
+import { toast } from "@/hooks/use-toast";
 
 const Index = () => {
   const [activeTab, setActiveTab] = useState('config');
@@ -25,7 +27,45 @@ const Index = () => {
     setCurrentTest(config);
     setTestStatus('running');
     setActiveTab('results');
-    // Test logic will be implemented here
+    
+    // Simulate a test run for demo purposes
+    simulateTestRun(config);
+    
+    toast({
+      title: "Test Started",
+      description: `Load test initiated with ${config.threads} threads and ${config.recipients.length} recipients.`,
+    });
+  };
+
+  const simulateTestRun = (config: any) => {
+    // Create a mock test result for demonstration
+    const mockResult = {
+      id: `test_${Date.now()}`,
+      configId: config.id || '',
+      status: 'completed' as const,
+      startTime: new Date(),
+      endTime: new Date(Date.now() + 30000), // 30 seconds later
+      totalEmails: config.totalEmails || config.threads * config.emailsPerThread,
+      sentSuccessfully: Math.floor((config.totalEmails || config.threads * config.emailsPerThread) * 0.95),
+      failed: Math.floor((config.totalEmails || config.threads * config.emailsPerThread) * 0.05),
+      emailsPerSecond: 15.5,
+      avgResponseTime: 245,
+      maxResponseTime: 850,
+      minResponseTime: 120,
+      errors: [],
+      smtpResponses: []
+    };
+
+    // Simulate test completion after a delay
+    setTimeout(() => {
+      setTestStatus('completed');
+      testHistoryService.saveTestResult(mockResult, config);
+      
+      toast({
+        title: "Test Completed",
+        description: `Test finished successfully. Check the history tab for details.`,
+      });
+    }, 5000);
   };
 
   const handleStopTest = () => {

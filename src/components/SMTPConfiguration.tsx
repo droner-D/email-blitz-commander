@@ -430,7 +430,7 @@ const SMTPConfiguration = ({ onStartTest, testStatus }: SMTPConfigurationProps) 
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-3 gap-4">
             <div>
               <Label htmlFor="threads" className="text-slate-300">Number of Threads</Label>
               <Input
@@ -440,6 +440,18 @@ const SMTPConfiguration = ({ onStartTest, testStatus }: SMTPConfigurationProps) 
                 max="100"
                 value={config.threads}
                 onChange={(e) => handleInputChange('threads', parseInt(e.target.value) || 1)}
+                className="bg-slate-700 border-slate-600 text-white"
+              />
+            </div>
+            <div>
+              <Label htmlFor="emailsPerThread" className="text-slate-300">Emails per Thread</Label>
+              <Input
+                id="emailsPerThread"
+                type="number"
+                min="1"
+                max="1000"
+                value={config.emailsPerThread}
+                onChange={(e) => handleInputChange('emailsPerThread', parseInt(e.target.value) || 1)}
                 className="bg-slate-700 border-slate-600 text-white"
               />
             </div>
@@ -510,10 +522,14 @@ const SMTPConfiguration = ({ onStartTest, testStatus }: SMTPConfigurationProps) 
           )}
 
           <div className="pt-4 border-t border-slate-700">
-            <div className="grid grid-cols-2 gap-4 text-slate-300 text-sm">
+            <div className="grid grid-cols-3 gap-4 text-slate-300 text-sm">
               <div>
                 <span className="text-slate-400">Estimated Emails:</span>
                 <div className="font-semibold">{getTotalEstimatedEmails()}</div>
+              </div>
+              <div>
+                <span className="text-slate-400">Threads × Emails:</span>
+                <div className="font-semibold">{config.threads} × {config.emailsPerThread}</div>
               </div>
               <div>
                 <span className="text-slate-400">Test Mode:</span>

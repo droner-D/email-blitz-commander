@@ -1,11 +1,12 @@
-
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { History, Search, Download, Trash2, Eye, Calendar, Mail, Clock, TrendingUp, AlertTriangle } from "lucide-react";
+import { testHistoryService } from '@/services/TestHistoryService';
+import { toast } from "@/hooks/use-toast";
 
 interface TestRecord {
   id: string;
@@ -16,7 +17,7 @@ interface TestRecord {
   threads: number;
   emailsPerThread: number;
   totalEmails: number;
-  successful: number;
+  sentSuccessfully: number;
   failed: number;
   duration: number;
   avgResponseTime: number;
@@ -28,90 +29,32 @@ const TestHistory = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState('all');
+  const [testHistory, setTestHistory] = useState<TestRecord[]>([]);
 
-  // Sample test history data
-  const testHistory: TestRecord[] = [
-    {
-      id: 'test_001',
-      timestamp: '2024-06-14 15:30:45',
-      server: 'smtp.gmail.com',
-      port: '587',
-      recipients: 1000,
-      threads: 5,
-      emailsPerThread: 20,
-      totalEmails: 100000,
-      successful: 98500,
-      failed: 1500,
-      duration: 3600,
-      avgResponseTime: 245,
-      status: 'completed',
-      subject: 'Marketing Campaign Q2'
-    },
-    {
-      id: 'test_002',
-      timestamp: '2024-06-14 12:15:30',
-      server: 'smtp.sendgrid.net',
-      port: '465',
-      recipients: 500,
-      threads: 3,
-      emailsPerThread: 15,
-      totalEmails: 22500,
-      successful: 22350,
-      failed: 150,
-      duration: 1800,
-      avgResponseTime: 189,
-      status: 'completed',
-      subject: 'Newsletter Weekly Update'
-    },
-    {
-      id: 'test_003',
-      timestamp: '2024-06-14 09:45:20',
-      server: 'smtp.outlook.com',
-      port: '587',
-      recipients: 2000,
-      threads: 10,
-      emailsPerThread: 25,
-      totalEmails: 500000,
-      successful: 485000,
-      failed: 15000,
-      duration: 7200,
-      avgResponseTime: 312,
-      status: 'completed',
-      subject: 'Product Launch Announcement'
-    },
-    {
-      id: 'test_004',
-      timestamp: '2024-06-13 16:20:10',
-      server: 'smtp.mailgun.org',
-      port: '587',
-      recipients: 150,
-      threads: 2,
-      emailsPerThread: 10,
-      totalEmails: 3000,
-      successful: 0,
-      failed: 0,
-      duration: 0,
-      avgResponseTime: 0,
-      status: 'failed',
-      subject: 'Authentication Test'
-    },
-    {
-      id: 'test_005',
-      timestamp: '2024-06-13 14:10:55',
-      server: 'smtp.gmail.com',
-      port: '587',
-      recipients: 750,
-      threads: 4,
-      emailsPerThread: 18,
-      totalEmails: 54000,
-      successful: 48500,
-      failed: 2500,
-      duration: 2700,
-      avgResponseTime: 278,
-      status: 'cancelled',
-      subject: 'Customer Survey 2024'
-    },
-  ];
+  useEffect(() => {
+    loadTestHistory();
+  }, []);
+
+  const loadTestHistory = () => {
+    const history = testHistoryService.getTestHistory();
+    const formattedHistory = history.map(test => ({
+      id: test.id,
+      timestamp: new Date(test.timestamp).toLocaleString(),
+      server: test.server,
+      port: test.port,
+      recipients: test.totalEmails, // Using totalEmails as recipients count
+      threads: 1, // Default value since it's not stored
+      emailsPerThread: test.totalEmails, // Default value
+      totalEmails: test.totalEmails,
+      sentSuccessfully: test.sentSuccessfully,
+      failed: test.failed,
+      duration: test.endTime ? Math.floor((new Date(test.endTime).getTime() - new Date(test.startTime).getTime()) / 1000) : 0,
+      avgResponseTime: test.avgResponseTime,
+      status: test.status as 'completed' | 'failed' | 'cancelled',
+      subject: test.subject
+    }));
+    setTestHistory(formattedHistory);
+  };
 
   const filteredTests = testHistory.filter(test => {
     const matchesSearch = test.server.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -120,12 +63,26 @@ const TestHistory = () => {
     
     const matchesStatus = statusFilter === 'all' || test.status === statusFilter;
     
+    const testDate = new Date(test.timestamp);
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    
     const matchesDate = dateFilter === 'all' || 
-                       (dateFilter === 'today' && test.timestamp.startsWith('2024-06-14')) ||
-                       (dateFilter === 'week' && new Date(test.timestamp) > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000));
+                       (dateFilter === 'today' && testDate >= today) ||
+                       (dateFilter === 'week' && testDate >= weekAgo);
     
     return matchesSearch && matchesStatus && matchesDate;
   });
+
+  const handleClearHistory = () => {
+    testHistoryService.clearHistory();
+    setTestHistory([]);
+    toast({
+      title: "History Cleared",
+      description: "All test history has been cleared.",
+    });
+  };
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -167,14 +124,19 @@ const TestHistory = () => {
                 <Download className="w-4 h-4 mr-2" />
                 Export
               </Button>
-              <Button variant="outline" size="sm" className="border-slate-600 text-red-400 hover:text-red-300">
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="border-slate-600 text-red-400 hover:text-red-300"
+                onClick={handleClearHistory}
+              >
                 <Trash2 className="w-4 h-4 mr-2" />
                 Clear All
               </Button>
             </div>
           </div>
           <CardDescription className="text-slate-400">
-            View and analyze previous SMTP load test results
+            View and analyze previous SMTP load test results ({testHistory.length} tests stored locally)
           </CardDescription>
         </CardHeader>
       </Card>
@@ -227,7 +189,12 @@ const TestHistory = () => {
             <CardContent className="flex items-center justify-center h-32">
               <div className="text-center text-slate-400">
                 <History className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                <p>No test records found matching your criteria</p>
+                <p>
+                  {testHistory.length === 0 
+                    ? "No test records found. Run a test to see history here." 
+                    : "No test records found matching your criteria"
+                  }
+                </p>
               </div>
             </CardContent>
           </Card>
@@ -268,7 +235,7 @@ const TestHistory = () => {
                   </div>
                   <div className="text-center">
                     <div className="text-slate-400 text-xs">Recipients</div>
-                    <div className="text-white font-semibold">{test.recipients.toLocaleString()}</div>
+                    <div className="text-white font-semibold">{test.totalEmails.toLocaleString()}</div>
                   </div>
                   <div className="text-center">
                     <div className="text-slate-400 text-xs">Configuration</div>
@@ -281,10 +248,10 @@ const TestHistory = () => {
                   <div className="text-center">
                     <div className="text-slate-400 text-xs">Success Rate</div>
                     <div className={`font-semibold ${test.status === 'completed' ? 
-                      calculateSuccessRate(test.successful, test.totalEmails) >= 95 ? 'text-green-400' : 
-                      calculateSuccessRate(test.successful, test.totalEmails) >= 90 ? 'text-yellow-400' : 'text-red-400'
+                      calculateSuccessRate(test.sentSuccessfully, test.totalEmails) >= 95 ? 'text-green-400' : 
+                      calculateSuccessRate(test.sentSuccessfully, test.totalEmails) >= 90 ? 'text-yellow-400' : 'text-red-400'
                       : 'text-slate-400'}`}>
-                      {test.status === 'completed' ? `${calculateSuccessRate(test.successful, test.totalEmails)}%` : 'N/A'}
+                      {test.status === 'completed' ? `${calculateSuccessRate(test.sentSuccessfully, test.totalEmails)}%` : 'N/A'}
                     </div>
                   </div>
                   <div className="text-center">
@@ -304,7 +271,7 @@ const TestHistory = () => {
                     <div className="flex items-center gap-2">
                       <TrendingUp className="w-4 h-4 text-green-400" />
                       <span className="text-slate-400 text-sm">Successful:</span>
-                      <span className="text-green-400 font-semibold">{test.successful.toLocaleString()}</span>
+                      <span className="text-green-400 font-semibold">{test.sentSuccessfully.toLocaleString()}</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <AlertTriangle className="w-4 h-4 text-red-400" />
@@ -375,8 +342,8 @@ const TestHistory = () => {
                 <div className="text-slate-400 text-sm">Avg Success Rate</div>
                 <div className="text-2xl font-bold text-blue-400">
                   {Math.round(filteredTests
-                    .filter(t => t.status === 'completed')
-                    .reduce((sum, test, _, arr) => sum + calculateSuccessRate(test.successful, test.totalEmails) / arr.length, 0)
+                    .filter(t => t.status === 'completed' && t.totalEmails > 0)
+                    .reduce((sum, test, _, arr) => sum + calculateSuccessRate(test.sentSuccessfully, test.totalEmails) / arr.length, 0)
                   )}%
                 </div>
               </div>
